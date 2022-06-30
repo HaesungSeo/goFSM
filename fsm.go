@@ -29,10 +29,11 @@ type TrnasitLog struct {
 
 // FSM Entry
 type FSMEntry struct {
-	Head  interface{}   // Owner Entry
-	ctrl  *FSMCTL       // FSM Rule for this Entry
-	State State         // Current State
-	Logs  []*TrnasitLog // transition log, for debug
+	Head   interface{}   // Owner Entry
+	ctrl   *FSMCTL       // FSM Rule for this Entry
+	State  State         // Current State
+	Logs   []*TrnasitLog // transition log, for debug
+	LogMax int
 }
 
 type FsmCallback func(n *FSMEntry, e Event) (State, error)
@@ -52,6 +53,7 @@ type FsmHandle struct {
 
 type FSMCTL struct {
 	InitState State
+	LogMax    int
 
 	// Valid States
 	States map[State]struct{}
@@ -82,6 +84,7 @@ type FSMDescStates []FSMDescState
 // FSM State-Event Descriptor
 type FSMDesc struct {
 	InitState string // Initial State for FSMEntry
+	LogMax    int    // maximum lengh of log
 	States    FSMDescStates
 }
 
@@ -104,6 +107,7 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 	newFsm.Handles = make(map[State]map[Event]FsmHandle)
 
 	newFsm.InitState = State{d.InitState}
+	newFsm.LogMax = d.LogMax
 
 	// Initialize given states, events
 	for _, state := range d.States {
@@ -220,6 +224,7 @@ func (f *FSMCTL) NewEntry() (*FSMEntry, error) {
 	entry.ctrl = f
 	entry.State = f.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
+	entry.LogMax = f.LogMax
 
 	return entry, nil
 }
@@ -257,6 +262,10 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	log.success = false
 
 	if logging {
+		if len(e.Logs) >= e.LogMax {
+			// truncate old
+			e.Logs = e.Logs[1:len(e.Logs)]
+		}
 		e.Logs = append(e.Logs, log)
 	}
 
@@ -340,6 +349,7 @@ func UnlockDoor(n *FSMEntry, e Event) (State, error) {
 func hello() {
 	d := FSMDesc{
 		InitState: "Closed",
+		LogMax:    20,
 		States: FSMDescStates{
 			{
 				State: "Closed",
@@ -376,9 +386,11 @@ func hello() {
 		return
 	}
 
-	e.DoFSM("Open", true)
-	e.DoFSM("Close", true)
-	e.DoFSM("Close", true)
+	for i := 0; i < 100; i++ {
+		e.DoFSM("Open", true)
+		e.DoFSM("Close", true)
+	}
+	e.DoFSM("Lock", true)
 
 	e.PrintLog(0)
 }
