@@ -44,10 +44,10 @@ func fsmCallbackDefault(n *FSMEntry, e Event) (State, error) {
 }
 
 type FsmHandle struct {
-	Default   bool        // is default handler
-	Name      string      // handle name
-	Handle    FsmCallback // handle function
-	NextState State       // default next states,
+	Default bool        // is default handler
+	Name    string      // handle name
+	Handle  FsmCallback // handle function
+	Cands   []State     // valid next state candidates
 }
 
 type FSMCTL struct {
@@ -65,9 +65,9 @@ type FSMCTL struct {
 
 // FSM Action Description Table
 type FSMDescEvent struct {
-	Event     string      // Event
-	Handle    FsmCallback // Handler for this {State, Event}
-	NextState string      // default next states,
+	Event      string      // Event
+	Handle     FsmCallback // Handler for this {State, Event}
+	Candidates []string    // valid next state candidates,
 	// if nil, handler MUST PROVIDE next state
 }
 
@@ -115,7 +115,9 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 			newFsm.Events[Event{event.Event}] = struct{}{}
 
 			// Index NextState
-			newFsm.States[State{event.NextState}] = struct{}{}
+			for _, nstate := range event.Candidates {
+				newFsm.States[State{nstate}] = struct{}{}
+			}
 		}
 
 		// Init Handles
@@ -130,7 +132,11 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 				false,
 				hName,
 				event.Handle,
-				State{event.NextState}}
+				make([]State, 0),
+			}
+			for _, nstate := range event.Candidates {
+				handle.Cands = append(handle.Cands, State{nstate})
+			}
 
 			s, found := newFsm.Handles[State{state.State}]
 			if found {
@@ -147,11 +153,7 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 			}
 
 			// Add handle
-			newFsm.Handles[State{state.State}][Event{event.Event}] = FsmHandle{
-				false,
-				hName,
-				event.Handle,
-				State{event.NextState}}
+			newFsm.Handles[State{state.State}][Event{event.Event}] = handle
 		}
 	}
 
@@ -172,7 +174,8 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 				true,
 				hName,
 				fsmCallbackDefault,
-				state}
+				make([]State, 0),
+			}
 
 			_, found := newFsm.Handles[state][event]
 			if found {
@@ -206,7 +209,7 @@ func (f *FSMCTL) DumpTable() {
 	for state, events := range f.Handles {
 		fmt.Printf("State[%s]\n", state)
 		for event, handle := range events {
-			fmt.Printf("  Event[%s] Func[%s] Next[%s]\n", event, handle.Name, handle.NextState)
+			fmt.Printf("  Event[%s] Func[%s] NextState[%s]\n", event, handle.Name, handle.Cands)
 		}
 	}
 }
@@ -239,11 +242,11 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	}
 
 	if handle.Default {
-		return &handle.NextState, nil
+		return &State{e.State.State}, nil
 	}
 
 	state := e.State.State
-	nState, err := handle.Handle(e, event)
+	stateReturned, err := handle.Handle(e, event)
 
 	// log transit
 	log := &TrnasitLog{}
@@ -259,12 +262,33 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 
 	if err != nil {
 		log.msg = err.Error()
+		// DO NOT CHANGE entry.State, if handle failed
 		return nil, err
 	}
-	log.success = true
-	e.State = nState
 
-	return &nState, nil
+	if len(handle.Cands) > 1 {
+		// validate the handle result with candidates
+		valid := false
+		for _, c := range handle.Cands {
+			if c == stateReturned {
+				valid = true
+				break
+			}
+		}
+		if valid {
+			// nextState determined by Handle
+			log.success = true
+			log.next = stateReturned.State
+			e.State = stateReturned
+		}
+	} else {
+		log.success = true
+		log.next = handle.Cands[0].State
+		// static nextState determined by FSMCtrl
+		e.State = handle.Cands[0]
+	}
+
+	return &stateReturned, nil
 }
 
 func t2s(t time.Time) string {
@@ -320,20 +344,20 @@ func hello() {
 			{
 				State: "Closed",
 				Events: FSMDescEvents{
-					{Event: "Open", Handle: OpenDoor, NextState: "Opened"},
-					{Event: "Lock", Handle: LockDoor, NextState: "Locked"},
+					{Event: "Open", Handle: OpenDoor, Candidates: []string{"Opened"}},
+					{Event: "Lock", Handle: LockDoor, Candidates: []string{"Closed", "Locked"}},
 				},
 			},
 			{
 				State: "Opened",
 				Events: FSMDescEvents{
-					{Event: "Close", Handle: CloseDoor, NextState: "Closed"},
+					{Event: "Close", Handle: CloseDoor, Candidates: []string{"Closed"}},
 				},
 			},
 			{
 				State: "Locked",
 				Events: FSMDescEvents{
-					{Event: "Unlock", Handle: UnlockDoor, NextState: "Closed"},
+					{Event: "Unlock", Handle: UnlockDoor, Candidates: []string{"Closed", "Locked"}},
 				},
 			},
 		},
@@ -344,7 +368,7 @@ func hello() {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
-	//fsmCtl.DumpTable()
+	fsmCtl.DumpTable()
 
 	e, err := fsmCtl.NewEntry()
 	if err != nil {
