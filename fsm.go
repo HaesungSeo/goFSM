@@ -37,7 +37,7 @@ type FSMEntry struct {
 	LogMax int
 }
 
-type FsmCallback func(Owner interface{}, event Event) (State, error)
+type FsmCallback func(Owner interface{}, event Event, UserData interface{}) (State, error)
 
 type FsmHandle struct {
 	Default bool        // is default handler
@@ -241,22 +241,22 @@ func (e *UndefinedHandle) Unwrap() error { return e.Err }
 // Do FSM
 // ev Event
 // logging save transit log
-func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
+func (e *FSMEntry) DoFSMwithData(ev string, userData interface{}, logging bool) (State, error) {
 	event := Event{ev}
 	_, found := e.Ctrl.Events[event]
 	if !found {
-		return nil, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
+		return State{}, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
 	}
 
 	handle, found := e.Ctrl.Handles[e.State][event]
 	if !found {
 		// no handle for this state-event pair
 		// may stop the transition for this {state, event} pair
-		return nil, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandleNotExists}
+		return State{}, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
 	state := e.State.State
-	stateReturned, err := handle.Handle(e.Owner, event)
+	stateReturned, err := handle.Handle(e.Owner, event, userData)
 	success := false
 
 	if err != nil {
@@ -301,7 +301,11 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 		e.Logs = append(e.Logs, log)
 	}
 
-	return &e.State, err
+	return e.State, err
+}
+
+func (e *FSMEntry) DoFSM(ev string, logging bool) (State, error) {
+	return e.DoFSMwithData(ev, nil, logging)
 }
 
 func t2s(t time.Time) string {
@@ -321,11 +325,11 @@ func (e *FSMEntry) PrintLog(last int) {
 	for i := start; i < nLogs; i++ {
 		log := e.Logs[i]
 		if log.success {
-			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Err=[]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next)
+			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Msg=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.success, log.msg)
 		} else {
-			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Err=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg)
+			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Msg=[%s] Err=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg, log.err.Error())
 		}
 	}
 }

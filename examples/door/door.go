@@ -12,15 +12,15 @@ type Door struct {
 }
 
 //func OpenDoor(data interface{}, event fsm.Event) (fsm.State, error) {
-func OpenDoor(data interface{}, event fsm.Event) (fsm.State, error) {
-	door := data.(*Door)
+func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
+	door := owner.(*Door)
 	entry := door.fmsEntry
 	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Event)
 	return fsm.State{"Opened"}, nil
 }
 
-func CloseDoor(data interface{}, event fsm.Event) (fsm.State, error) {
-	door := data.(*Door)
+func CloseDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
+	door := owner.(*Door)
 	entry := door.fmsEntry
 	fmt.Printf("%s: State=%s, Event=%s, Action=CloseDoor\n", door.name, entry.State, event.Event)
 	return fsm.State{"Closed"}, nil
