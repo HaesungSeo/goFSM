@@ -52,17 +52,15 @@ func main() {
 	// invalid event error
 	state, err := e.DoFSM("lock", true)
 	if err != nil {
-		if errors.Is(err, fsmerror.ErrEvent) {
-			fmt.Printf("Event ERROR: %s\n", err.Error())
-		} else if errors.Is(err, fsmerror.ErrState) {
-			fmt.Printf("State ERROR: %s\n", err.Error())
-		} else if errors.Is(err, fsmerror.ErrHandle) {
-			fmt.Printf("Handle ERROR: %s\n", err.Error())
+		if errors.Is(err, fsmerror.ErrInvalidEvent) {
+			fmt.Printf("ERROR: %s\n", err.Error())
+		} else if errors.Is(err, fsmerror.ErrHandleNotExists) {
+			fmt.Printf("ERROR: %s\n", err.Error())
 		} else {
 			fmt.Printf("ERROR: %s\n", err.Error())
 		}
 	} else {
-		fmt.Printf("%s new state: %s\n", door.name, state.State)
+		fmt.Printf("%s Next State: %s\n", door.name, state.State)
 	}
 
 	// Closed -> Opened
@@ -71,17 +69,15 @@ func main() {
 	// Opened -> Opened
 	state, err = e.DoFSM("Open", true)
 	if err != nil {
-		if errors.Is(err, fsmerror.ErrEvent) {
-			fmt.Printf("Event ERROR: %s\n", err.Error())
-		} else if errors.Is(err, fsmerror.ErrState) {
-			fmt.Printf("State ERROR: %s\n", err.Error())
-		} else if errors.Is(err, fsmerror.ErrHandle) {
-			fmt.Printf("Handle ERROR: %s\n", err.Error())
+		if errors.Is(err, fsmerror.ErrInvalidEvent) {
+			fmt.Printf("ERROR: %s\n", err.Error())
+		} else if errors.Is(err, fsmerror.ErrHandleNotExists) {
+			fmt.Printf("ERROR: %s\n", err.Error())
 		} else {
 			fmt.Printf("ERROR: %s\n", err.Error())
 		}
 	} else {
-		fmt.Printf("%s new state: %s\n", door.name, state.State)
+		fmt.Printf("%s Next State: %s\n", door.name, state.State)
 	}
 
 	e.PrintLog(0)

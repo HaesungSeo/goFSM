@@ -165,7 +165,7 @@ func New(d FSMDesc) (*FSMCTL, error) {
 							Event:     event.Event,
 							OldHandle: old.Name,
 							NewHandle: hName,
-							Err:       fsmerror.ErrHandle,
+							Err:       fsmerror.ErrDupHandle,
 						}
 					}
 				}
@@ -213,6 +213,7 @@ func (f *FSMCTL) NewEntry(owner interface{}) (*FSMEntry, error) {
 	return entry, nil
 }
 
+// Invalid Event Error
 type InvalidEvent struct {
 	Event string
 	Err   error
@@ -224,6 +225,7 @@ func (e *InvalidEvent) Error() string {
 
 func (e *InvalidEvent) Unwrap() error { return e.Err }
 
+// Undefined Handle Error
 type UndefinedHandle struct {
 	State string
 	Event string
@@ -231,7 +233,7 @@ type UndefinedHandle struct {
 }
 
 func (e *UndefinedHandle) Error() string {
-	return e.Err.Error() + ": State " + e.State + " can't accept " + e.Event
+	return e.Err.Error() + ": State " + e.State + " Event " + e.Event
 }
 
 func (e *UndefinedHandle) Unwrap() error { return e.Err }
@@ -243,26 +245,55 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	event := Event{ev}
 	_, found := e.Ctrl.Events[event]
 	if !found {
-		return nil, &InvalidEvent{Event: ev, Err: fsmerror.ErrEvent}
+		return nil, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
 	}
 
 	handle, found := e.Ctrl.Handles[e.State][event]
 	if !found {
-		return nil, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandle}
+		// no handle for this state-event pair
+		// may stop the transition for this {state, event} pair
+		return nil, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
 	state := e.State.State
 	stateReturned, err := handle.Handle(e.Owner, event)
+	success := false
 
-	// log transit
-	log := &TrnasitLog{}
-	log.time = time.Now()
-	log.state = state
-	log.event = event.Event
-	log.handle = handle.Name
-	log.success = false
+	if err != nil {
+		// no state change at all
+	} else {
+		if len(handle.Cands) > 1 {
+			// validate the handle result with candidates
+			valid := false
+			for _, c := range handle.Cands {
+				if c == stateReturned {
+					valid = true
+					break
+				}
+			}
+			if valid {
+				// nextState determined by Handle
+				e.State = stateReturned
+				success = true
+			}
+		} else {
+			// static nextState determined by FSMCtrl
+			e.State = handle.Cands[0]
+			success = true
+		}
+	}
 
-	if logging {
+	if e.LogMax > 0 && logging {
+		// logging enabled
+		log := &TrnasitLog{}
+		log.time = time.Now()
+		log.state = state
+		log.event = event.Event
+		log.handle = handle.Name
+		log.success = success
+		log.next = e.State.State
+		log.err = err
+
 		if len(e.Logs) >= e.LogMax {
 			// truncate old
 			e.Logs = e.Logs[1:len(e.Logs)]
@@ -270,37 +301,7 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 		e.Logs = append(e.Logs, log)
 	}
 
-	if err != nil {
-		log.err = err
-		// DO NOT CHANGE entry.State, if handle failed
-		return nil, err
-	}
-
-	if len(handle.Cands) > 1 {
-		// validate the handle result with candidates
-		valid := false
-		for _, c := range handle.Cands {
-			if c == stateReturned {
-				valid = true
-				break
-			}
-		}
-		if valid {
-			// nextState determined by Handle
-			e.State = stateReturned
-
-			log.success = true
-			log.next = stateReturned.State
-		}
-	} else {
-		// static nextState determined by FSMCtrl
-		e.State = handle.Cands[0]
-
-		log.success = true
-		log.next = handle.Cands[0].State
-	}
-
-	return &stateReturned, nil
+	return &e.State, err
 }
 
 func t2s(t time.Time) string {

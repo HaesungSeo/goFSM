@@ -29,6 +29,7 @@ func CloseDoor(data interface{}, event fsm.Event) (fsm.State, error) {
 func main() {
 	d := fsm.FSMDesc{
 		InitState: "Closed",
+		LogMax:    20,
 		States: fsm.StateDesc{
 			{
 				State: "Closed",
