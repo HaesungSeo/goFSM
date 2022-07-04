@@ -1,7 +1,6 @@
 package goFSM
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -31,22 +30,14 @@ type TrnasitLog struct {
 
 // FSM Entry
 type FSMEntry struct {
-	Head   interface{}   // Owner Entry
-	ctrl   *FSMCTL       // FSM Rule for this Entry
+	Owner  interface{}   // Owner Entry
+	Ctrl   *FSMCTL       // FSM Rule for this Entry
 	State  State         // Current State
 	Logs   []*TrnasitLog // transition log, for debug
 	LogMax int
 }
 
-type FsmCallback func(n *FSMEntry, e Event) (State, error)
-
-func fsmCallbackDefault(n *FSMEntry, e Event) (State, error) {
-	// no state changed
-	nextState := State{n.State.State}
-	errStr := fmt.Sprintf("State[%s] Event[%s] Undefined",
-		n.State.State, e.Event)
-	return nextState, errors.New(errStr)
-}
+type FsmCallback func(Owner interface{}, event Event) (State, error)
 
 type FsmHandle struct {
 	Default bool        // is default handler
@@ -101,10 +92,10 @@ func getFunctionName(i interface{}) string {
 }
 
 type StateEventConflictError struct {
-	State     string
-	Event     string
-	OldHandle string
-	NewHandle string
+	State     string // current state
+	Event     string // input event
+	OldHandle string // current handle
+	NewHandle string // overwritting handle
 	Err       error
 }
 
@@ -118,8 +109,7 @@ func (e *StateEventConflictError) Unwrap() error { return e.Err }
 
 // Create New FSM Control
 // d FSM Descritor
-// verbose, level of verbosity, allow print warnings (0 for disabled)
-func New(d FSMDesc, verbose int) (*FSMCTL, error) {
+func New(d FSMDesc) (*FSMCTL, error) {
 	newFsm := FSMCTL{}
 
 	newFsm.States = make(map[State]struct{})
@@ -169,6 +159,7 @@ func New(d FSMDesc, verbose int) (*FSMCTL, error) {
 				old, handlefound := s[Event{event.Event}]
 				if handlefound {
 					if &old.Handle != &handle.Handle {
+						// state-event table MUST HAVE only one handle per entry
 						return nil, &StateEventConflictError{
 							State:     state.State,
 							Event:     event.Event,
@@ -211,10 +202,10 @@ func (f *FSMCTL) DumpTable() {
 }
 
 // Do FSM
-func (f *FSMCTL) NewEntry(head interface{}) (*FSMEntry, error) {
+func (f *FSMCTL) NewEntry(owner interface{}) (*FSMEntry, error) {
 	entry := &FSMEntry{}
-	entry.Head = head
-	entry.ctrl = f
+	entry.Owner = owner
+	entry.Ctrl = f
 	entry.State = f.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
 	entry.LogMax = f.LogMax
@@ -240,7 +231,7 @@ type UndefinedHandle struct {
 }
 
 func (e *UndefinedHandle) Error() string {
-	return e.Err.Error() + ": State " + e.State + " Event " + e.Event
+	return e.Err.Error() + ": State " + e.State + " can't accept " + e.Event
 }
 
 func (e *UndefinedHandle) Unwrap() error { return e.Err }
@@ -250,18 +241,18 @@ func (e *UndefinedHandle) Unwrap() error { return e.Err }
 // logging save transit log
 func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	event := Event{ev}
-	_, found := e.ctrl.Events[event]
+	_, found := e.Ctrl.Events[event]
 	if !found {
 		return nil, &InvalidEvent{Event: ev, Err: fsmerror.ErrEvent}
 	}
 
-	handle, found := e.ctrl.Handles[e.State][event]
+	handle, found := e.Ctrl.Handles[e.State][event]
 	if !found {
 		return nil, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandle}
 	}
 
 	state := e.State.State
-	stateReturned, err := handle.Handle(e, event)
+	stateReturned, err := handle.Handle(e.Owner, event)
 
 	// log transit
 	log := &TrnasitLog{}
