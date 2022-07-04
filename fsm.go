@@ -1,12 +1,13 @@
-package main
+package goFSM
 
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"runtime"
 	"time"
+
+	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
 )
 
 type State struct {
@@ -25,6 +26,7 @@ type TrnasitLog struct {
 	success bool      // Handle result
 	next    string    // next event determined by Handler
 	msg     string    // Messages related for this fsm event
+	err     error     // Error, from handle
 }
 
 // FSM Entry
@@ -39,9 +41,11 @@ type FSMEntry struct {
 type FsmCallback func(n *FSMEntry, e Event) (State, error)
 
 func fsmCallbackDefault(n *FSMEntry, e Event) (State, error) {
+	// no state changed
+	nextState := State{n.State.State}
 	errStr := fmt.Sprintf("State[%s] Event[%s] Undefined",
 		n.State.State, e.Event)
-	return State{}, errors.New(errStr)
+	return nextState, errors.New(errStr)
 }
 
 type FsmHandle struct {
@@ -73,19 +77,19 @@ type FSMDescEvent struct {
 	// if nil, handler MUST PROVIDE next state
 }
 
-type FSMDescEvents []FSMDescEvent
+type EventDesc []FSMDescEvent
 
 type FSMDescState struct {
 	State  string
-	Events FSMDescEvents
+	Events EventDesc
 }
-type FSMDescStates []FSMDescState
+type StateDesc []FSMDescState
 
 // FSM State-Event Descriptor
 type FSMDesc struct {
 	InitState string // Initial State for FSMEntry
 	LogMax    int    // maximum lengh of log
-	States    FSMDescStates
+	States    StateDesc
 }
 
 func getFunctionName(i interface{}) string {
@@ -96,10 +100,26 @@ func getFunctionName(i interface{}) string {
 	return funcName
 }
 
+type StateEventConflictError struct {
+	State     string
+	Event     string
+	OldHandle string
+	NewHandle string
+	Err       error
+}
+
+func (e *StateEventConflictError) Error() string {
+	return "State:" + e.State + ", Event:" + e.Event + " Old Handle " +
+		e.OldHandle + " New Handle " + e.NewHandle + ": " +
+		e.Err.Error()
+}
+
+func (e *StateEventConflictError) Unwrap() error { return e.Err }
+
 // Create New FSM Control
 // d FSM Descritor
 // verbose, level of verbosity, allow print warnings (0 for disabled)
-func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
+func New(d FSMDesc, verbose int) (*FSMCTL, error) {
 	newFsm := FSMCTL{}
 
 	newFsm.States = make(map[State]struct{})
@@ -123,8 +143,10 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 				newFsm.States[State{nstate}] = struct{}{}
 			}
 		}
+	}
 
-		// Init Handles
+	// Allocate Handles
+	for _, state := range d.States {
 		newFsm.Handles[State{state.State}] = make(map[Event]FsmHandle)
 	}
 
@@ -142,15 +164,17 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 				handle.Cands = append(handle.Cands, State{nstate})
 			}
 
-			s, found := newFsm.Handles[State{state.State}]
-			if found {
-				old, found := s[Event{event.Event}]
-				if found {
+			s, statefound := newFsm.Handles[State{state.State}]
+			if statefound {
+				old, handlefound := s[Event{event.Event}]
+				if handlefound {
 					if &old.Handle != &handle.Handle {
-						errStr := fmt.Sprintf("Duplicated: State[%s] Event[%s] old Handle[%s] != new Handle[%s]",
-							state.State, event.Event, old.Name, hName)
-						if verbose > 0 {
-							fmt.Fprintf(os.Stderr, "Warning: %s\n", errStr)
+						return nil, &StateEventConflictError{
+							State:     state.State,
+							Event:     event.Event,
+							OldHandle: old.Name,
+							NewHandle: hName,
+							Err:       fsmerror.ErrHandle,
 						}
 					}
 				}
@@ -158,38 +182,6 @@ func FSMCTLNew(d FSMDesc, verbose int) (*FSMCTL, error) {
 
 			// Add handle
 			newFsm.Handles[State{state.State}][Event{event.Event}] = handle
-		}
-	}
-
-	// Fill Undefined State-Event-Handles with NO-OP
-	for state, _ := range newFsm.States {
-		_, found := newFsm.Handles[state]
-		if !found {
-			// Maybe NextState not used as Current State for some Events
-			errStr := fmt.Sprintf("No State[%s], but NextState exists",
-				state)
-			// Dont return incomplete fsm, it may cause panic
-			return nil, errors.New(errStr)
-		}
-
-		for event, _ := range newFsm.Events {
-			hName := getFunctionName(fsmCallbackDefault)
-			nopHandle := FsmHandle{
-				true,
-				hName,
-				fsmCallbackDefault,
-				make([]State, 0),
-			}
-
-			_, found := newFsm.Handles[state][event]
-			if found {
-				continue
-			}
-			newFsm.Handles[state][event] = nopHandle
-			errStr := fmt.Sprintf("State[%s] Event[%s] get NoOp", state, event)
-			if verbose > 0 {
-				fmt.Fprintf(os.Stderr, "Warning: %s\n", errStr)
-			}
 		}
 	}
 
@@ -219,8 +211,9 @@ func (f *FSMCTL) DumpTable() {
 }
 
 // Do FSM
-func (f *FSMCTL) NewEntry() (*FSMEntry, error) {
+func (f *FSMCTL) NewEntry(head interface{}) (*FSMEntry, error) {
 	entry := &FSMEntry{}
+	entry.Head = head
 	entry.ctrl = f
 	entry.State = f.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
@@ -229,6 +222,29 @@ func (f *FSMCTL) NewEntry() (*FSMEntry, error) {
 	return entry, nil
 }
 
+type InvalidEvent struct {
+	Event string
+	Err   error
+}
+
+func (e *InvalidEvent) Error() string {
+	return e.Err.Error() + ": " + e.Event
+}
+
+func (e *InvalidEvent) Unwrap() error { return e.Err }
+
+type UndefinedHandle struct {
+	State string
+	Event string
+	Err   error
+}
+
+func (e *UndefinedHandle) Error() string {
+	return e.Err.Error() + ": State " + e.State + " Event " + e.Event
+}
+
+func (e *UndefinedHandle) Unwrap() error { return e.Err }
+
 // Do FSM
 // ev Event
 // logging save transit log
@@ -236,18 +252,12 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	event := Event{ev}
 	_, found := e.ctrl.Events[event]
 	if !found {
-		errStr := fmt.Sprintf("undefined Event: %s", ev)
-		return nil, errors.New(errStr)
+		return nil, &InvalidEvent{Event: ev, Err: fsmerror.ErrEvent}
 	}
 
 	handle, found := e.ctrl.Handles[e.State][event]
 	if !found {
-		errStr := fmt.Sprintf("No handle for State: %s, Event: %s", e.State.State, ev)
-		return nil, errors.New(errStr)
-	}
-
-	if handle.Default {
-		return &State{e.State.State}, nil
+		return nil, &UndefinedHandle{State: e.State.State, Event: ev, Err: fsmerror.ErrHandle}
 	}
 
 	state := e.State.State
@@ -270,7 +280,7 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 	}
 
 	if err != nil {
-		log.msg = err.Error()
+		log.err = err
 		// DO NOT CHANGE entry.State, if handle failed
 		return nil, err
 	}
@@ -286,15 +296,17 @@ func (e *FSMEntry) DoFSM(ev string, logging bool) (*State, error) {
 		}
 		if valid {
 			// nextState determined by Handle
+			e.State = stateReturned
+
 			log.success = true
 			log.next = stateReturned.State
-			e.State = stateReturned
 		}
 	} else {
-		log.success = true
-		log.next = handle.Cands[0].State
 		// static nextState determined by FSMCtrl
 		e.State = handle.Cands[0]
+
+		log.success = true
+		log.next = handle.Cands[0].State
 	}
 
 	return &stateReturned, nil
@@ -324,77 +336,4 @@ func (e *FSMEntry) PrintLog(last int) {
 				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg)
 		}
 	}
-}
-
-func OpenDoor(n *FSMEntry, e Event) (State, error) {
-	fmt.Printf("%p: State=%s, Event=%s, OpenDoor\n", n, n.State, e.Event)
-	return State{"Opened"}, nil
-}
-
-func CloseDoor(n *FSMEntry, e Event) (State, error) {
-	fmt.Printf("%p: State=%s, Event=%s, CloseDoor\n", n, n.State, e.Event)
-	return State{"Closed"}, nil
-}
-
-func LockDoor(n *FSMEntry, e Event) (State, error) {
-	fmt.Printf("%p: State=%s, Event=%s, LockDoor\n", n, n.State, e.Event)
-	return State{"Locked"}, nil
-}
-
-func UnlockDoor(n *FSMEntry, e Event) (State, error) {
-	fmt.Printf("%p: State=%s, Event=%s, UnlockDoor\n", n, n.State, e.Event)
-	return State{"Closed"}, nil
-}
-
-func hello() {
-	d := FSMDesc{
-		InitState: "Closed",
-		LogMax:    20,
-		States: FSMDescStates{
-			{
-				State: "Closed",
-				Events: FSMDescEvents{
-					{Event: "Open", Handle: OpenDoor, Candidates: []string{"Opened"}},
-					{Event: "Lock", Handle: LockDoor, Candidates: []string{"Closed", "Locked"}},
-				},
-			},
-			{
-				State: "Opened",
-				Events: FSMDescEvents{
-					{Event: "Close", Handle: CloseDoor, Candidates: []string{"Closed"}},
-				},
-			},
-			{
-				State: "Locked",
-				Events: FSMDescEvents{
-					{Event: "Unlock", Handle: UnlockDoor, Candidates: []string{"Closed", "Locked"}},
-				},
-			},
-		},
-	}
-
-	fsmCtl, err := FSMCTLNew(d, 0)
-	if err != nil {
-		fmt.Printf("ERROR: %s\n", err)
-		return
-	}
-	fsmCtl.DumpTable()
-
-	e, err := fsmCtl.NewEntry()
-	if err != nil {
-		fmt.Printf("ERROR: %s\n", err)
-		return
-	}
-
-	for i := 0; i < 100; i++ {
-		e.DoFSM("Open", true)
-		e.DoFSM("Close", true)
-	}
-	e.DoFSM("Lock", true)
-
-	e.PrintLog(0)
-}
-
-func main() {
-	hello()
 }

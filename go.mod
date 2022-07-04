@@ -1,3 +1,3 @@
-module github-haesung.com/HaesungSeo/goFSM.git
+module github.com/HaesungSeo/goFSM
 
 go 1.18
