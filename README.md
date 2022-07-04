@@ -2,14 +2,15 @@
 Finite State Machine(FSM) for go
 
 # import in your project
-```
+```go
 import (
     "github.com/HaesungSeo/goFSM"
 )
 ```
 
 # example code
-```
+from example/door/door.go
+```go
 package main
 
 import (
@@ -82,7 +83,7 @@ func main() {
 ```
 
 execute result
-```
+```bash
 $ ./test 
 myDoor: State={Closed}, Event=Open, Action=OpenDoor
 2022-07-04 18:28:46 KST State=[Closed] Event=[Open] Handle=[main.OpenDoor] Return=true NextState=[Opened] Err=[]
