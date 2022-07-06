@@ -29,24 +29,24 @@ type TrnasitLog struct {
 }
 
 // FSM Entry
-type FSMEntry[OWNER any, USERDATA any] struct {
-	Owner  OWNER                    // FSM owner
-	Ctrl   *FSMCTL[OWNER, USERDATA] // FSM Rule for this Entry
-	State  State                    // Current State
-	Logs   []*TrnasitLog            // transition log, for debug
+type FSMEntry struct {
+	Owner  interface{}   // Owner Entry
+	Ctrl   *FSMCTL       // FSM Rule for this Entry
+	State  State         // Current State
+	Logs   []*TrnasitLog // transition log, for debug
 	LogMax int
 }
 
-type FsmCallback[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, error)
+type FsmCallback func(Owner interface{}, event Event, UserData interface{}) (State, error)
 
-type FsmHandle[OWNER any, USERDATA any] struct {
-	Default bool                         // is default handler
-	Name    string                       // handle name
-	Handle  FsmCallback[OWNER, USERDATA] // handle function
-	Cands   []State                      // valid next state candidates
+type FsmHandle struct {
+	Default bool        // is default handler
+	Name    string      // handle name
+	Handle  FsmCallback // handle function
+	Cands   []State     // valid next state candidates
 }
 
-type FSMCTL[OWNER any, USERDATA any] struct {
+type FSMCTL struct {
 	InitState State
 	LogMax    int
 
@@ -57,30 +57,30 @@ type FSMCTL[OWNER any, USERDATA any] struct {
 	Events map[Event]struct{}
 
 	// Handles indexted by State,Event
-	Handles map[State]map[Event]FsmHandle[OWNER, USERDATA]
+	Handles map[State]map[Event]FsmHandle
 }
 
 // FSM Action Description Table
-type FSMDescEvent[OWNER any, USERDATA any] struct {
-	Event      string                       // Event
-	Handle     FsmCallback[OWNER, USERDATA] // Handler for this {State, Event}
-	Candidates []string                     // valid next state candidates,
+type FSMDescEvent struct {
+	Event      string      // Event
+	Handle     FsmCallback // Handler for this {State, Event}
+	Candidates []string    // valid next state candidates,
 	// if nil, handler MUST PROVIDE next state
 }
 
-type EventDesc[OWNER any, USERDATA any] []FSMDescEvent[OWNER, USERDATA]
+type EventDesc []FSMDescEvent
 
-type FSMDescState[OWNER any, USERDATA any] struct {
+type FSMDescState struct {
 	State  string
-	Events EventDesc[OWNER, USERDATA]
+	Events EventDesc
 }
-type StateDesc[OWNER any, USERDATA any] []FSMDescState[OWNER, USERDATA]
+type StateDesc []FSMDescState
 
 // FSM State-Event Descriptor
-type FSMDesc[OWNER any, USERDATA any] struct {
+type FSMDesc struct {
 	InitState string // Initial State for FSMEntry
 	LogMax    int    // maximum lengh of log
-	States    StateDesc[OWNER, USERDATA]
+	States    StateDesc
 }
 
 func getFunctionName(i interface{}) string {
@@ -109,12 +109,12 @@ func (e *StateEventConflictError) Unwrap() error { return e.Err }
 
 // Create New FSM Control
 // d FSM Descritor
-func FsmNew[OWNER any, USERDATA any](d *FSMDesc[OWNER, USERDATA]) (*FSMCTL[OWNER, USERDATA], error) {
-	newFsm := FSMCTL[OWNER, USERDATA]{}
+func New(d FSMDesc) (*FSMCTL, error) {
+	newFsm := FSMCTL{}
 
 	newFsm.States = make(map[State]struct{})
 	newFsm.Events = make(map[Event]struct{})
-	newFsm.Handles = make(map[State]map[Event]FsmHandle[OWNER, USERDATA])
+	newFsm.Handles = make(map[State]map[Event]FsmHandle)
 
 	newFsm.InitState = State{d.InitState}
 	newFsm.LogMax = d.LogMax
@@ -137,14 +137,14 @@ func FsmNew[OWNER any, USERDATA any](d *FSMDesc[OWNER, USERDATA]) (*FSMCTL[OWNER
 
 	// Allocate Handles
 	for _, state := range d.States {
-		newFsm.Handles[State{state.State}] = make(map[Event]FsmHandle[OWNER, USERDATA])
+		newFsm.Handles[State{state.State}] = make(map[Event]FsmHandle)
 	}
 
 	// Add User defined State-Event-Handles
 	for _, state := range d.States {
 		for _, event := range state.Events {
 			hName := getFunctionName(event.Handle)
-			handle := FsmHandle[OWNER, USERDATA]{
+			handle := FsmHandle{
 				false,
 				hName,
 				event.Handle,
@@ -180,7 +180,7 @@ func FsmNew[OWNER any, USERDATA any](d *FSMDesc[OWNER, USERDATA]) (*FSMCTL[OWNER
 }
 
 // Dump Handlers
-func (f *FSMCTL[ONWER, USERDATA]) DumpTable() {
+func (f *FSMCTL) DumpTable() {
 	fmt.Printf("InitState[%s]\n", f.InitState)
 
 	fmt.Printf("All States\n")
@@ -201,17 +201,14 @@ func (f *FSMCTL[ONWER, USERDATA]) DumpTable() {
 	}
 }
 
-type linker[OWNER any, USERDATA any] func(owner OWNER, entry *FSMEntry[OWNER, USERDATA])
-
 // Do FSM
-func (f *FSMCTL[OWNER, USERDATA]) NewEntry(owner OWNER, l linker[OWNER, USERDATA]) (*FSMEntry[OWNER, USERDATA], error) {
-	entry := &FSMEntry[OWNER, USERDATA]{}
+func (f *FSMCTL) NewEntry(owner interface{}) (*FSMEntry, error) {
+	entry := &FSMEntry{}
 	entry.Owner = owner
 	entry.Ctrl = f
 	entry.State = f.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
 	entry.LogMax = f.LogMax
-	l(owner, entry)
 
 	return entry, nil
 }
@@ -241,24 +238,10 @@ func (e *UndefinedHandle) Error() string {
 
 func (e *UndefinedHandle) Unwrap() error { return e.Err }
 
-// Undefined next State Error
-type UndefinedNextState struct {
-	State  string
-	Event  string
-	nState string
-	Err    error
-}
-
-func (e *UndefinedNextState) Error() string {
-	return e.Err.Error() + ": State " + e.State + " Event " + e.Event + " nextState " + e.nState
-}
-
-func (e *UndefinedNextState) Unwrap() error { return e.Err }
-
 // Do FSM
 // ev Event
 // logging save transit log
-func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, logging bool) (State, error) {
+func (e *FSMEntry) DoFSMwithData(ev string, userData interface{}, logging bool) (State, error) {
 	event := Event{ev}
 	_, found := e.Ctrl.Events[event]
 	if !found {
@@ -292,15 +275,11 @@ func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, 
 				// nextState determined by Handle
 				e.State = stateReturned
 				success = true
-			} else {
-				err = &UndefinedNextState{State: e.State.State, Event: ev, nState: stateReturned.State, Err: fsmerror.ErrInvNextState}
 			}
-		} else if handle.Cands[0] == stateReturned {
+		} else {
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
 			success = true
-		} else {
-			err = &UndefinedNextState{State: e.State.State, Event: ev, nState: stateReturned.State, Err: fsmerror.ErrInvNextState}
 		}
 	}
 
@@ -325,9 +304,8 @@ func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, 
 	return e.State, err
 }
 
-func (e *FSMEntry[OWNER, USERDATA]) DoFSM(ev string, logging bool) (State, error) {
-	var d USERDATA
-	return e.DoFSMwithData(ev, d, logging)
+func (e *FSMEntry) DoFSM(ev string, logging bool) (State, error) {
+	return e.DoFSMwithData(ev, nil, logging)
 }
 
 func t2s(t time.Time) string {
@@ -337,7 +315,7 @@ func t2s(t time.Time) string {
 // PrintLog
 // last print number of latest n logs, if n > 0
 //   otherwise print all logs
-func (e *FSMEntry[OWNER, USERDATA]) PrintLog(last int) {
+func (e *FSMEntry) PrintLog(last int) {
 	nLogs := len(e.Logs)
 	start := 0
 	if last > 0 && nLogs > last {
@@ -348,7 +326,7 @@ func (e *FSMEntry[OWNER, USERDATA]) PrintLog(last int) {
 		log := e.Logs[i]
 		if log.success {
 			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Msg=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg)
+				t2s(log.time), log.state, log.event, log.handle, log.success, log.msg)
 		} else {
 			fmt.Printf("%s State=[%s] Event=[%s] Handle=[%s] Return=%t NextState=[%s] Msg=[%s] Err=[%s]\n",
 				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg, log.err.Error())

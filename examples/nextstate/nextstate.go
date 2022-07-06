@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 
-	fsm "github.com/HaesungSeo/goFSM"
+	fsm "github.com/HaesungSeo/goFSM/internal/fsm"
 	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
 )
 
