@@ -28,25 +28,25 @@ func mylinker(d *Door, e *fsm.FSMEntry[*Door, *Key]) {
 }
 
 // 4) define Callback functions
-func OpenGen(door *Door, event fsm.Event, _ *Key) (fsm.State, error) {
+func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, error) {
 	entry := door.entry
 
 	fmt.Printf("Door %s: State=%s, Event=%s, Action=OpenDoor\n",
 		door.name, entry.State, event.Event)
-	return fsm.State{"Opened"}, nil
+	return fsm.State{State: "Opened"}, nil
 }
 
-func LockGen(door *Door, event fsm.Event, key *Key) (fsm.State, error) {
+func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, error) {
 	entry := door.entry
 	if key != nil {
 		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
 			door.name, entry.State, event.Event, key.id)
 	} else {
-		fmt.Printf("Door %s: State=%s, Event=%s, Action=LockDoor\n",
+		fmt.Printf("Door %s: State=%s, Event=%s, NOKEY Action=LockDoor\n",
 			door.name, entry.State, event.Event)
 
 	}
-	return fsm.State{"Opened"}, nil
+	return fsm.State{State: "Opened"}, nil
 }
 
 func main() {
@@ -61,8 +61,8 @@ func main() {
 			{
 				State: "Closed",
 				Events: fsm.EventDesc[*Door, *Key]{
-					{Event: "Open", Handle: OpenGen, Candidates: []string{"Opened"}},
-					{Event: "Lock", Handle: LockGen, Candidates: []string{"Closed"}},
+					{Event: "Open", Handle: OpenDoor, Candidates: []string{"Opened"}},
+					{Event: "Lock", Handle: LockDoor, Candidates: []string{"Closed"}},
 				},
 			},
 		},
@@ -82,9 +82,6 @@ func main() {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
-
-	// e.DoFSM("Open", true)
-	// e.DoFSM("Close", true)
 
 	// 9) DoFSM() !
 	var key *Key = nil
