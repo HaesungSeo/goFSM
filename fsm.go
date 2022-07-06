@@ -9,14 +9,17 @@ import (
 	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
 )
 
+// FSM State
 type State struct {
 	State string
 }
 
+// FSM Event
 type Event struct {
 	Event string
 }
 
+// FSM State Event Transition log information
 type TrnasitLog struct {
 	time    time.Time // time event occurs
 	state   string    // current State
@@ -37,15 +40,17 @@ type FSMEntry[OWNER any, USERDATA any] struct {
 	LogMax int
 }
 
+// FSM State Event Handle func
 type FsmCallback[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, error)
 
+// FSM State Event Handler information
 type FsmHandle[OWNER any, USERDATA any] struct {
-	Default bool                         // is default handler
-	Name    string                       // handle name
-	Handle  FsmCallback[OWNER, USERDATA] // handle function
-	Cands   []State                      // valid next state candidates
+	Name   string                       // handle name
+	Handle FsmCallback[OWNER, USERDATA] // handle function
+	Cands  []State                      // valid next state candidates
 }
 
+// FSM Table
 type FSMCTL[OWNER any, USERDATA any] struct {
 	InitState State
 	LogMax    int
@@ -107,7 +112,7 @@ func (e *StateEventConflictError) Error() string {
 
 func (e *StateEventConflictError) Unwrap() error { return e.Err }
 
-// Create New FSM Control
+// Create New FSM Control Instance
 // d FSM Descritor
 func FsmNew[OWNER any, USERDATA any](d *FSMDesc[OWNER, USERDATA]) (*FSMCTL[OWNER, USERDATA], error) {
 	newFsm := FSMCTL[OWNER, USERDATA]{}
@@ -145,7 +150,6 @@ func FsmNew[OWNER any, USERDATA any](d *FSMDesc[OWNER, USERDATA]) (*FSMCTL[OWNER
 		for _, event := range state.Events {
 			hName := getFunctionName(event.Handle)
 			handle := FsmHandle[OWNER, USERDATA]{
-				false,
 				hName,
 				event.Handle,
 				make([]State, 0),
@@ -203,7 +207,8 @@ func (f *FSMCTL[ONWER, USERDATA]) DumpTable() {
 
 type linker[OWNER any, USERDATA any] func(owner OWNER, entry *FSMEntry[OWNER, USERDATA])
 
-// Do FSM
+// Create New FSM Entry Instance, controlled by FSMCTL(FSM Control) Instance
+// owner Entry Owner
 func (f *FSMCTL[OWNER, USERDATA]) NewEntry(owner OWNER, l linker[OWNER, USERDATA]) (*FSMEntry[OWNER, USERDATA], error) {
 	entry := &FSMEntry[OWNER, USERDATA]{}
 	entry.Owner = owner
@@ -257,8 +262,8 @@ func (e *UndefinedNextState) Unwrap() error { return e.Err }
 
 // Do FSM
 // ev Event
-// logging save transit log
-func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, logging bool) (State, error) {
+// userData event specific data
+func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA) (State, error) {
 	event := Event{ev}
 	_, found := e.Ctrl.Events[event]
 	if !found {
@@ -304,8 +309,7 @@ func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, 
 		}
 	}
 
-	if e.LogMax > 0 && logging {
-		// logging enabled
+	if e.LogMax > 0 {
 		log := &TrnasitLog{}
 		log.time = time.Now()
 		log.state = state
@@ -325,9 +329,11 @@ func (e *FSMEntry[OWNER, USERDATA]) DoFSMwithData(ev string, userData USERDATA, 
 	return e.State, err
 }
 
-func (e *FSMEntry[OWNER, USERDATA]) DoFSM(ev string, logging bool) (State, error) {
+// Do FSM
+// ev Event
+func (e *FSMEntry[OWNER, USERDATA]) DoFSM(ev string) (State, error) {
 	var d USERDATA
-	return e.DoFSMwithData(ev, d, logging)
+	return e.DoFSMwithData(ev, d)
 }
 
 func t2s(t time.Time) string {

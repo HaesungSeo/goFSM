@@ -91,7 +91,7 @@ func main() {
 	if *user != "" {
 		key = &Key{id: *user}
 	}
-	state, err := e.DoFSMwithData("Lock", key, true)
+	state, err := e.DoFSMwithData("Lock", key)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
