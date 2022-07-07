@@ -10,8 +10,8 @@ import (
 )
 
 type Door struct {
-	fmsEntry *fsm.FSMEntry
-	name     string
+	entry *fsm.Entry
+	name  string
 }
 
 type Key struct {
@@ -20,8 +20,8 @@ type Key struct {
 
 func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
 	door := owner.(*Door)
-	entry := door.fmsEntry
-	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Event)
+	entry := door.entry
+	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Name)
 	return fsm.State{"Opened"}, nil
 }
 
@@ -39,11 +39,11 @@ func (e *LockWithNoKeyError) Unwrap() error { return e.Err }
 
 func LockDoor(data interface{}, event fsm.Event, userData interface{}) (fsm.State, error) {
 	door := data.(*Door)
-	entry := door.fmsEntry
+	entry := door.entry
 	key := userData.(*Key)
 
 	if key != nil {
-		fmt.Printf("%s: State=%s, Event=%s, Action=LockDoor, Key=%s\n", door.name, entry.State, event.Event, key.id)
+		fmt.Printf("%s: State=%s, Event=%s, Action=LockDoor, Key=%s\n", door.name, entry.State, event.Name, key.id)
 
 		// fsm state can be changed inside handle, according to userData
 		if key.id == "root" {
@@ -51,9 +51,9 @@ func LockDoor(data interface{}, event fsm.Event, userData interface{}) (fsm.Stat
 		}
 		return entry.State, nil
 	} else {
-		fmt.Printf("%s: State=%s, Event=%s, Action=LockDoor, Oops\n", door.name, entry.State, event.Event)
-		return fsm.State{}, &LockWithNoKeyError{State: entry.State.State,
-			Event: event.Event, Err: fsmerror.ErrInvalidEvent}
+		fmt.Printf("%s: State=%s, Event=%s, Action=LockDoor, Oops\n", door.name, entry.State, event.Name)
+		return fsm.State{}, &LockWithNoKeyError{State: entry.State.Name,
+			Event: event.Name, Err: fsmerror.ErrInvalidEvent}
 	}
 }
 
@@ -61,15 +61,15 @@ func main() {
 	user := flag.String("k", "", "key id")
 	flag.Parse()
 
-	d := fsm.FSMDesc{
+	d := fsm.TableDesc{
 		InitState: "Closed",
 		LogMax:    20,
-		States: fsm.StateDesc{
+		States: []fsm.StateDesc{
 			{
 				State: "Closed",
-				Events: fsm.EventDesc{
-					{Event: "Open", Handle: OpenDoor, Candidates: []string{"Opened"}},
-					{Event: "Lock", Handle: LockDoor, Candidates: []string{"Closed", "Locked"}},
+				Events: []fsm.EventDesc{
+					{Event: "Open", Func: OpenDoor, Candidates: []string{"Opened"}},
+					{Event: "Lock", Func: LockDoor, Candidates: []string{"Closed", "Locked"}},
 				},
 			},
 		},
@@ -87,13 +87,13 @@ func main() {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
-	door.fmsEntry = e
+	door.entry = e
 
 	var key *Key = nil
 	if *user != "" {
 		key = &Key{id: *user}
 	}
-	state, err := e.DoFSMwithData("Lock", key, true)
+	state, err := e.TransitWithData("Lock", key, true)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
@@ -103,7 +103,7 @@ func main() {
 			fmt.Printf("ERROR: %s\n", err.Error())
 		}
 	} else {
-		fmt.Printf("%s Next State: %s\n", door.name, state.State)
+		fmt.Printf("%s Next State: %s\n", door.name, state.Name)
 	}
 
 	e.PrintLog(0)

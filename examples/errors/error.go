@@ -9,27 +9,27 @@ import (
 )
 
 type Door struct {
-	fmsEntry *fsm.FSMEntry
-	name     string
+	entry *fsm.Entry
+	name  string
 }
 
 //func OpenDoor(data interface{}, event fsm.Event) (fsm.State, error) {
 func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
 	door := owner.(*Door)
-	entry := door.fmsEntry
-	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Event)
+	entry := door.entry
+	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Name)
 	return fsm.State{"Opened"}, nil
 }
 
 func main() {
-	d := fsm.FSMDesc{
+	d := fsm.TableDesc{
 		InitState: "Closed",
 		LogMax:    20,
-		States: fsm.StateDesc{
+		States: []fsm.StateDesc{
 			{
 				State: "Closed",
-				Events: fsm.EventDesc{
-					{Event: "Open", Handle: OpenDoor, Candidates: []string{"Opened"}},
+				Events: []fsm.EventDesc{
+					{Event: "Open", Func: OpenDoor, Candidates: []string{"Opened"}},
 				},
 			},
 		},
@@ -47,10 +47,10 @@ func main() {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
-	door.fmsEntry = e
+	door.entry = e
 
 	// invalid event error
-	state, err := e.DoFSM("lock", true)
+	state, err := e.Transit("lock", true)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
@@ -60,14 +60,14 @@ func main() {
 			fmt.Printf("ERROR: %s\n", err.Error())
 		}
 	} else {
-		fmt.Printf("%s Next State: %s\n", door.name, state.State)
+		fmt.Printf("%s Next State: %s\n", door.name, state.Name)
 	}
 
 	// Closed -> Opened
-	e.DoFSM("Open", true)
+	e.Transit("Open", true)
 
 	// Opened -> Opened
-	state, err = e.DoFSM("Open", true)
+	state, err = e.Transit("Open", true)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
@@ -77,7 +77,7 @@ func main() {
 			fmt.Printf("ERROR: %s\n", err.Error())
 		}
 	} else {
-		fmt.Printf("%s Next State: %s\n", door.name, state.State)
+		fmt.Printf("%s Next State: %s\n", door.name, state.Name)
 	}
 
 	e.PrintLog(0)
