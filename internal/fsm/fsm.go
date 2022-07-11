@@ -100,9 +100,8 @@ type StateEventConflictError struct {
 }
 
 func (e *StateEventConflictError) Error() string {
-	return "State:" + e.State + ", Event:" + e.Event + " Old Func " +
-		e.OldHandle + " New Func " + e.NewHandle + ": " +
-		e.Err.Error()
+	return e.Err.Error() + ": State " + e.State + " Event " + e.Event + " Old Func " +
+		e.OldHandle + " New Func " + e.NewHandle
 }
 
 func (e *StateEventConflictError) Unwrap() error { return e.Err }
