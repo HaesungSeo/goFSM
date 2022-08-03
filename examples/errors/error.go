@@ -14,11 +14,11 @@ type Door struct {
 }
 
 //func OpenDoor(data interface{}, event fsm.Event) (fsm.State, error) {
-func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
+func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
 	door := owner.(*Door)
 	entry := door.entry
 	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Name)
-	return fsm.State{"Opened"}, nil
+	return fsm.State{"Opened"}, true, nil
 }
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 	}
 
 	door := &Door{name: "myDoor"}
-	e, err := fsmCtl.NewEntry(door)
+	e := fsmCtl.NewEntry(door)
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err)
 		return
@@ -50,7 +50,7 @@ func main() {
 	door.entry = e
 
 	// invalid event error
-	state, err := e.Transit("lock", true)
+	state, _, err := e.Transit("lock", true)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
@@ -67,7 +67,7 @@ func main() {
 	e.Transit("Open", true)
 
 	// Opened -> Opened
-	state, err = e.Transit("Open", true)
+	state, _, err = e.Transit("Open", true)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())

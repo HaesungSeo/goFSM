@@ -21,14 +21,13 @@ type Event struct {
 
 // FSM State Event Transition log information
 type TrnasitLog struct {
-	time    time.Time // time event occurs
-	state   string    // current State
-	event   string    // Event
-	handle  string    // Func
-	success bool      // Func result
-	next    string    // next event determined by Handler
-	msg     string    // Messages related for this fsm event
-	err     error     // Error, from handle
+	time   time.Time // time event occurs
+	state  string    // current State
+	event  string    // Event
+	handle string    // Func
+	next   string    // next event determined by Handler
+	msg    string    // Messages related for this fsm event
+	err    error     // Error, from handle
 }
 
 // FSM Entry
@@ -40,8 +39,15 @@ type Entry[OWNER any, USERDATA any] struct {
 	LogMax int
 }
 
+// status represent the end of transition
+type EndOfTrans bool
+
 // FSM State Event Func func
-type HandleFunc[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, error)
+// returns
+//   State - next state
+//   bool - End of Transition
+//   error - handler error
+type HandleFunc[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, bool, error)
 
 // FSM State Event Handler information
 type Handle[OWNER any, USERDATA any] struct {
@@ -201,20 +207,17 @@ func (tbl *Table[ONWER, USERDATA]) Dump() {
 	}
 }
 
-type linker[OWNER any, USERDATA any] func(owner OWNER, entry *Entry[OWNER, USERDATA])
-
 // Create New FSM Entry Instance, controlled by Table(FSM Control) Instance
 // owner Entry Owner
-func (tbl *Table[OWNER, USERDATA]) NewEntry(owner OWNER, l linker[OWNER, USERDATA]) (*Entry[OWNER, USERDATA], error) {
+func (tbl *Table[OWNER, USERDATA]) NewEntry(owner OWNER) *Entry[OWNER, USERDATA] {
 	entry := &Entry[OWNER, USERDATA]{}
 	entry.Owner = owner
 	entry.table = tbl
 	entry.State = tbl.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
 	entry.LogMax = tbl.LogMax
-	l(owner, entry)
 
-	return entry, nil
+	return entry
 }
 
 // Invalid Event Error
@@ -259,23 +262,26 @@ func (e *UndefinedNextState) Unwrap() error { return e.Err }
 // Do FSM
 // ev Event
 // userData event specific data
-func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (State, error) {
+// returns
+//    State - next state
+//    bool - represents end of transition
+//    error - handler returned error
+func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (State, bool, error) {
 	event := Event{ev}
 	_, found := e.table.Events[event]
 	if !found {
-		return State{}, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
+		return State{}, true, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
 	}
 
 	handle, found := e.table.Handles[e.State][event]
 	if !found {
 		// no handle for this state-event pair
 		// may stop the transition for this {state, event} pair
-		return State{}, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
+		return State{}, true, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
 	state := e.State.Name
-	stateReturned, err := handle.Func(e.Owner, event, userData)
-	success := false
+	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
 
 	if err != nil {
 		// no state change at all
@@ -292,14 +298,12 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 			if valid {
 				// nextState determined by Func
 				e.State = stateReturned
-				success = true
 			} else {
 				err = &UndefinedNextState{State: e.State.Name, Event: ev, nState: stateReturned.Name, Err: fsmerror.ErrInvNextState}
 			}
 		} else if handle.Cands[0] == stateReturned {
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
-			success = true
 		} else {
 			err = &UndefinedNextState{State: e.State.Name, Event: ev, nState: stateReturned.Name, Err: fsmerror.ErrInvNextState}
 		}
@@ -311,7 +315,6 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 		log.state = state
 		log.event = event.Name
 		log.handle = handle.Name
-		log.success = success
 		log.next = e.State.Name
 		log.err = err
 
@@ -322,12 +325,12 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 		e.Logs = append(e.Logs, log)
 	}
 
-	return e.State, err
+	return e.State, eot, err
 }
 
 // Do FSM
 // ev Event
-func (e *Entry[OWNER, USERDATA]) Transit(ev string) (State, error) {
+func (e *Entry[OWNER, USERDATA]) Transit(ev string) (State, bool, error) {
 	var d USERDATA
 	return e.TransitWithData(ev, d)
 }
@@ -348,12 +351,12 @@ func (e *Entry[OWNER, USERDATA]) PrintLog(last int) {
 
 	for i := start; i < nLogs; i++ {
 		log := e.Logs[i]
-		if log.success {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] Return=%t NextState=[%s] Msg=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg)
+		if log.err != nil {
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s] Err=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.next, log.err.Error())
 		} else {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] Return=%t NextState=[%s] Msg=[%s] Err=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg, log.err.Error())
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.next)
 		}
 	}
 }

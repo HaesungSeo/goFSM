@@ -31,18 +31,18 @@ type Door struct {
     name     string
 }
 
-func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
+func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
     door := owner.(*Door)
     entry := door.entry
     fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Event)
-    return fsm.State{"Opened"}, nil
+    return fsm.State{"Opened"}, true, nil
 }
 
-func CloseDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
+func CloseDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
     door := owner.(*Door)
     entry := door.entry
     fmt.Printf("%s: State=%s, Event=%s, Action=CloseDoor\n", door.name, entry.State, event.Event)
-    return fsm.State{"Closed"}, nil
+    return fsm.State{"Closed"}, true, nil
 }
 
 func main() {
@@ -137,38 +137,49 @@ type Door struct {
     entry *fsm.Entry[*Door, *Key]
 }
 
-// 3) define Link function to be used inside NewEntry()
-func mylinker(d *Door, e *fsm.Entry[*Door, *Key]) {
-    d.entry = e
+// 3) define Callback functions
+func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, bool, error) {
+	entry := door.entry
+
+	fmt.Printf("Door %s: State=%s, Event=%s, Action=OpenDoor\n",
+		door.name, entry.State, event.Name)
+	return fsm.State{Name: "Opened"}, true, nil
 }
 
-// 4) define Callback functions
-func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, error) {
-    entry := door.entry
-
-    fmt.Printf("Door %s: State=%s, Event=%s, Action=OpenDoor\n",
-        door.name, entry.State, event.Event)
-    return fsm.State{State: "Opened"}, nil
+type NoKeyError struct {
+	State string // current state
+	Event string // input event
+	Err   error
 }
 
-func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, error) {
-    entry := door.entry
-    if key != nil {
-        fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
-            door.name, entry.State, event.Event, key.id)
-    } else {
-        fmt.Printf("Door %s: State=%s, Event=%s, NOKEY Action=LockDoor\n",
-            door.name, entry.State, event.Event)
+func (e *NoKeyError) Error() string {
+	return e.Err.Error() + ": State " + e.State + " Event " + e.Event + " No key"
+}
 
-    }
-    return fsm.State{State: "Opened"}, nil
+func (e *NoKeyError) Unwrap() error { return e.Err }
+
+func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, bool, error) {
+	entry := door.entry
+	if key != nil {
+		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
+			door.name, entry.State, event.Name, key.id)
+		return fsm.State{Name: "Locked"}, true, nil
+	}
+
+	fmt.Printf("Door %s: State=%s, Event=%s, NOKEY Action=LockDoor\n",
+		door.name, entry.State, event.Name)
+	return fsm.State{Name: "Closed"}, true, &NoKeyError{
+		State: entry.State.Name,
+		Event: event.Name,
+		Err:   fsmerror.ErrInvalidUserData,
+	}
 }
 
 func main() {
     user := flag.String("k", "", "key id")
     flag.Parse()
 
-    // 6) define FSM descriptor
+    // 4) define FSM descriptor
     d := &fsm.TableDesc[*Door, *Key]{
         InitState: "Closed",
         LogMax:    20,
@@ -177,40 +188,37 @@ func main() {
                 State: "Closed",
                 Events: []fsm.EventDesc[*Door, *Key]{
                     {Event: "Open", Func: OpenDoor, Candidates: []string{"Opened"}},
-                    {Event: "Lock", Func: LockDoor, Candidates: []string{"Closed"}},
+                {Event: "Lock", Func: LockDoor, Candidates: []string{"Closed", "Locked"}},
                 },
             },
         },
     }
 
-    // 7) define FSM Instance
+    // 5) define FSM Instance
     fsmCtl, err := fsm.NewTable(d)
     if err != nil {
         fmt.Printf("ERROR: %s\n", err)
         return
     }
 
-    // 8) define FSM Entry
+    // 6) define FSM Entry
     door := Door{name: "myDoor"}
-    e, err := fsmCtl.NewEntry(&door, mylinker)
-    if err != nil {
-        fmt.Printf("ERROR: %s\n", err)
-        return
-    }
+    door.entry = fsmCtl.NewEntry(&door)
 
-    // 9) Transit() !
+    // 7) Transit() !
     var key *Key = nil
     if *user != "" {
         key = &Key{id: *user}
     }
     state, err := e.TransitWithData("Lock", key)
     if err != nil {
-        if errors.Is(err, fsmerror.ErrInvalidEvent) {
-            fmt.Printf("ERROR: %s\n", err.Error())
-        } else if errors.Is(err, fsmerror.ErrHandleNotExists) {
-            fmt.Printf("ERROR: %s\n", err.Error())
-        } else {
-            fmt.Printf("ERROR: %s\n", err.Error())
+        switch {
+            case errors.Is(err, fsmerror.ErrInvalidEvent):
+                fmt.Printf("ERROR: %s\n", err.Error())
+            case errors.Is(err, fsmerror.ErrHandleNotExists):
+                fmt.Printf("ERROR: %s\n", err.Error())
+            default:
+                fmt.Printf("ERROR: %s\n", err.Error())
         }
     } else {
         fmt.Printf("%s Next State: %s\n", door.name, state.State)
@@ -223,23 +231,25 @@ func main() {
 execute result
 ```bash
 $ ./generic
+$ ./generic 
 Door myDoor: State={Closed}, Event=Lock, NOKEY Action=LockDoor
-ERROR: invalid next state: State Closed Event Lock nextState Opened
-2022-07-06 16:14:04 KST State=[Closed] Event=[Lock] Func=[main.LockDoor] Return=false NextState=[Closed] Msg=[] Err=[invalid next state: State Closed Event Lock nextState Opened]
+ERROR3: invalid userdata: State Closed Event Lock No key
+2022-08-03 14:18:17 KST State=[Closed] Event=[Lock] Func=[main.LockDoor] NextState=[Closed] Err=[invalid userdata: State Closed Event Lock No key]
 $ ./generic -k root
 Door myDoor: State={Closed}, Event=Lock, Key=root, Action=LockDoor
-ERROR: invalid next state: State Closed Event Lock nextState Opened
-2022-07-06 16:14:10 KST State=[Closed] Event=[Lock] Func=[main.LockDoor] Return=false NextState=[Closed] Msg=[] Err=[invalid next state: State Closed Event Lock nextState Opened]
+### myDoor Next State: Locked
+2022-08-03 14:18:20 KST State=[Closed] Event=[Lock] Func=[main.LockDoor] NextState=[Locked]
+$ 
 $
 ```
 
 callbacks can have more clear data types with generic type<p>
 simple version
 ```go
-func OpenDoor(owner interface{}, event fsm.Event, userData interface{}) (fsm.State, error)
+func OpenDoor(owner interface{}, event fsm.Event, userData interface{}) (fsm.State, bool, error)
 ```
 
 generic version
 ```go
-func OpenDoor(door *Door, event fsm.Event, key *Key) (fsm.State, error)
+func OpenDoor(door *Door, event fsm.Event, key *Key) (fsm.State, bool, error)
 ```

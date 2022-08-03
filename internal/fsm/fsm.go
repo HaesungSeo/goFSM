@@ -25,7 +25,6 @@ type TrnasitLog struct {
 	handle  string    // Func
 	success bool      // Func result
 	next    string    // next event determined by Handler
-	msg     string    // Messages related for this fsm event
 	err     error     // Error, from handle
 }
 
@@ -39,8 +38,8 @@ type Entry struct {
 }
 
 // State Event Handle Function
-// returns (nextState, error)
-type HandleFunc func(Owner interface{}, event Event, UserData interface{}) (State, error)
+// returns (nextState, endOftransit, error)
+type HandleFunc func(Owner interface{}, event Event, UserData interface{}) (State, bool, error)
 
 type Handle struct {
 	Default bool       // is default handler
@@ -201,7 +200,7 @@ func (tbl *Table) Dump() {
 }
 
 // Do FSM
-func (tbl *Table) NewEntry(owner interface{}) (*Entry, error) {
+func (tbl *Table) NewEntry(owner interface{}) *Entry {
 	entry := &Entry{}
 	entry.Owner = owner
 	entry.table = tbl
@@ -209,7 +208,7 @@ func (tbl *Table) NewEntry(owner interface{}) (*Entry, error) {
 	entry.Logs = make([]*TrnasitLog, 0)
 	entry.LogMax = tbl.LogMax
 
-	return entry, nil
+	return entry
 }
 
 // Invalid Event Error
@@ -240,23 +239,22 @@ func (e *UndefinedHandle) Unwrap() error { return e.Err }
 // Do FSM
 // ev Event
 // logging save transit log
-func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (State, error) {
+func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (State, bool, error) {
 	event := Event{ev}
 	_, found := e.table.Events[event]
 	if !found {
-		return State{}, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
+		return State{}, true, &InvalidEvent{Event: ev, Err: fsmerror.ErrInvalidEvent}
 	}
 
 	handle, found := e.table.Handles[e.State][event]
 	if !found {
 		// no handle for this state-event pair
 		// may stop the transition for this {state, event} pair
-		return State{}, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
+		return State{}, true, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
 	state := e.State.Name
-	stateReturned, err := handle.Func(e.Owner, event, userData)
-	success := false
+	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
 
 	if err != nil {
 		// no state change at all
@@ -273,12 +271,10 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 			if valid {
 				// nextState determined by Func
 				e.State = stateReturned
-				success = true
 			}
 		} else {
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
-			success = true
 		}
 	}
 
@@ -289,7 +285,6 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 		log.state = state
 		log.event = event.Name
 		log.handle = handle.Name
-		log.success = success
 		log.next = e.State.Name
 		log.err = err
 
@@ -300,10 +295,10 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 		e.Logs = append(e.Logs, log)
 	}
 
-	return e.State, err
+	return e.State, eot, err
 }
 
-func (e *Entry) Transit(ev string, logging bool) (State, error) {
+func (e *Entry) Transit(ev string, logging bool) (State, bool, error) {
 	return e.TransitWithData(ev, nil, logging)
 }
 
@@ -323,12 +318,12 @@ func (e *Entry) PrintLog(last int) {
 
 	for i := start; i < nLogs; i++ {
 		log := e.Logs[i]
-		if log.success {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] Return=%t NextState=[%s] Msg=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.msg)
+		if log.err != nil {
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s] Err=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.err.Error())
 		} else {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] Return=%t NextState=[%s] Msg=[%s] Err=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.success, log.next, log.msg, log.err.Error())
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle)
 		}
 	}
 }
