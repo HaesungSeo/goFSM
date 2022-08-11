@@ -225,16 +225,36 @@ func (e *InvalidEvent) Unwrap() error { return e.Err }
 
 // Undefined Func Error
 type UndefinedHandle struct {
-	State string
-	Event string
-	Err   error
+	State  string
+	Event  string
+	Handle string
+	nState string
+	Err    error
 }
 
 func (e *UndefinedHandle) Error() string {
-	return e.Err.Error() + ": State " + e.State + " Event " + e.Event
+	return e.Err.Error() + ": State " + e.State + " Event " + e.Event +
+		": Handle not defined"
 }
 
 func (e *UndefinedHandle) Unwrap() error { return e.Err }
+
+// Undefined next State Error
+type UndefinedNextState struct {
+	State  string
+	Event  string
+	Handle string
+	nState string
+	Err    error
+}
+
+func (e *UndefinedNextState) Error() string {
+	return e.Err.Error() + ": State " + e.State +
+		" Event " + e.Event + " Handle " + e.Handle +
+		": returns undefined state " + e.nState
+}
+
+func (e *UndefinedNextState) Unwrap() error { return e.Err }
 
 // Do FSM
 // ev Event
@@ -258,7 +278,24 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 
 	if err != nil {
 		// no state change at all
+
+	} else if stateReturned.Name == "" {
+		// fsm handle follow the fsm description tables' next state
+		if len(handle.Cands) > 1 {
+			// too many next state
+			err = &UndefinedNextState{
+				State:  e.State.Name,
+				Event:  ev,
+				Handle: handle.Name,
+				nState: "(nil)",
+				Err:    fsmerror.ErrInvNextState,
+			}
+		} else {
+			e.State = handle.Cands[0]
+		}
+
 	} else {
+		// state which fsm handle returned, must be one of the pre-defined candidates
 		if len(handle.Cands) > 1 {
 			// validate the handle result with candidates
 			valid := false
@@ -271,15 +308,30 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 			if valid {
 				// nextState determined by Func
 				e.State = stateReturned
+			} else {
+				err = &UndefinedNextState{
+					State:  e.State.Name,
+					Event:  ev,
+					Handle: handle.Name,
+					nState: stateReturned.Name,
+					Err:    fsmerror.ErrInvNextState,
+				}
 			}
-		} else {
+		} else if handle.Cands[0] == stateReturned {
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
+		} else {
+			err = &UndefinedNextState{
+				State:  e.State.Name,
+				Event:  ev,
+				Handle: handle.Name,
+				nState: stateReturned.Name,
+				Err:    fsmerror.ErrInvNextState,
+			}
 		}
 	}
 
-	if e.LogMax > 0 && logging {
-		// logging enabled
+	if e.LogMax > 0 {
 		log := &TrnasitLog{}
 		log.time = time.Now()
 		log.state = state
