@@ -93,7 +93,7 @@ func main() {
 	if *user != "" {
 		key = &Key{id: *user}
 	}
-	state, _, err := e.TransitWithData("Lock", key, true)
+	state, _, err := e.TransitWithData("Lock", key)
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())

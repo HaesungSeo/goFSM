@@ -58,14 +58,16 @@ type Handle[OWNER any, USERDATA any] struct {
 
 // FSM Table
 type Table[OWNER any, USERDATA any] struct {
-	InitState State
-	LogMax    int
+	InitState   State
+	FinalStates []string
+	FSMap       map[string]interface{}
+	LogMax      int
 
 	// Valid States
-	States map[State]struct{}
+	States map[State]interface{}
 
 	// Valid Events
-	Events map[Event]struct{}
+	Events map[Event]interface{}
 
 	// Handles indexted by State,Event
 	Handles map[State]map[Event]Handle[OWNER, USERDATA]
@@ -86,9 +88,10 @@ type StateDesc[OWNER any, USERDATA any] struct {
 
 // FSM State-Event Table Descriptor
 type TableDesc[OWNER any, USERDATA any] struct {
-	InitState string // Initial State for Entry
-	LogMax    int    // maximum lengh of log
-	States    []StateDesc[OWNER, USERDATA]
+	InitState   string   // Initial State for Entry
+	FinalStates []string // Final States for Entry
+	LogMax      int      // maximum lengh of log
+	States      []StateDesc[OWNER, USERDATA]
 }
 
 func getFunctionName(i interface{}) string {
@@ -119,25 +122,30 @@ func (e *StateEventConflictError) Unwrap() error { return e.Err }
 func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OWNER, USERDATA], error) {
 	tbl := Table[OWNER, USERDATA]{}
 
-	tbl.States = make(map[State]struct{})
-	tbl.Events = make(map[Event]struct{})
+	tbl.States = make(map[State]interface{})
+	tbl.Events = make(map[Event]interface{})
 	tbl.Handles = make(map[State]map[Event]Handle[OWNER, USERDATA])
+	tbl.FSMap = make(map[string]interface{})
 
 	tbl.InitState = State{d.InitState}
+	tbl.FinalStates = d.FinalStates
+	for _, s := range d.FinalStates {
+		tbl.FSMap[s] = nil
+	}
 	tbl.LogMax = d.LogMax
 
 	// Initialize given states, events
 	for _, state := range d.States {
 		// Index State
-		tbl.States[State{state.State}] = struct{}{}
+		tbl.States[State{state.State}] = nil
 
 		for _, event := range state.Events {
 			// Index Events
-			tbl.Events[Event{event.Event}] = struct{}{}
+			tbl.Events[Event{event.Event}] = nil
 
 			// Index NextState
 			for _, nstate := range event.Candidates {
-				tbl.States[State{nstate}] = struct{}{}
+				tbl.States[State{nstate}] = nil
 			}
 		}
 	}
@@ -188,6 +196,11 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 // Dump Handlers
 func (tbl *Table[ONWER, USERDATA]) Dump() {
 	fmt.Printf("InitState[%s]\n", tbl.InitState)
+
+	fmt.Printf("FinalStates\n")
+	for _, state := range tbl.FinalStates {
+		fmt.Printf("  [%s]\n", state)
+	}
 
 	fmt.Printf("All States\n")
 	for state, _ := range tbl.States {
@@ -339,6 +352,11 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 				Err:    fsmerror.ErrInvNextState,
 			}
 		}
+	}
+
+	// check the next state is defined as final state
+	if _, ok := e.table.FSMap[e.State.Name]; ok {
+		eot = true
 	}
 
 	if e.LogMax > 0 {

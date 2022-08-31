@@ -60,7 +60,7 @@ func main() {
 	}
 	door.entry = e
 
-	_, _, err = e.Transit("Open", true)
+	_, _, err = e.Transit("Open")
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err.Error())
 	}

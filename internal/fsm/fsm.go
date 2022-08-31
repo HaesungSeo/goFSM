@@ -55,14 +55,16 @@ type Handle struct {
 }
 
 type Table struct {
-	InitState State
-	LogMax    int
+	InitState   State
+	FinalStates []string
+	FSMap       map[string]interface{}
+	LogMax      int
 
 	// Valid States
-	States map[State]struct{}
+	States map[State]interface{}
 
 	// Valid Events
-	Events map[Event]struct{}
+	Events map[Event]interface{}
 
 	// Handles indexted by State,Event
 	Handles map[State]map[Event]Handle
@@ -83,9 +85,10 @@ type StateDesc struct {
 
 // FSM State-Event Descriptor
 type TableDesc struct {
-	InitState string // Initial State for Entry
-	LogMax    int    // maximum lengh of log
-	States    []StateDesc
+	InitState   string   // Initial State for Entry
+	FinalStates []string // Final States for Entry
+	LogMax      int      // maximum lengh of log
+	States      []StateDesc
 }
 
 func getFunctionName(i interface{}) string {
@@ -116,25 +119,30 @@ func (e *StateEventConflictError) Unwrap() error { return e.Err }
 func New(d TableDesc) (*Table, error) {
 	tbl := Table{}
 
-	tbl.States = make(map[State]struct{})
-	tbl.Events = make(map[Event]struct{})
+	tbl.States = make(map[State]interface{})
+	tbl.Events = make(map[Event]interface{})
 	tbl.Handles = make(map[State]map[Event]Handle)
+	tbl.FSMap = make(map[string]interface{})
 
 	tbl.InitState = State{d.InitState}
+	tbl.FinalStates = d.FinalStates
+	for _, s := range d.FinalStates {
+		tbl.FSMap[s] = nil
+	}
 	tbl.LogMax = d.LogMax
 
 	// Initialize given states, events
 	for _, state := range d.States {
 		// Index State
-		tbl.States[State{state.State}] = struct{}{}
+		tbl.States[State{state.State}] = nil
 
 		for _, event := range state.Events {
 			// Index Events
-			tbl.Events[Event{event.Event}] = struct{}{}
+			tbl.Events[Event{event.Event}] = nil
 
 			// Index NextState
 			for _, nstate := range event.Candidates {
-				tbl.States[State{nstate}] = struct{}{}
+				tbl.States[State{nstate}] = nil
 			}
 		}
 	}
@@ -186,6 +194,11 @@ func New(d TableDesc) (*Table, error) {
 // Dump Handlers
 func (tbl *Table) Dump() {
 	fmt.Printf("InitState[%s]\n", tbl.InitState)
+
+	fmt.Printf("FinalStates\n")
+	for _, state := range tbl.FinalStates {
+		fmt.Printf("  [%s]\n", state)
+	}
 
 	fmt.Printf("All States\n")
 	for state, _ := range tbl.States {
@@ -265,12 +278,11 @@ func (e *UndefinedNextState) Unwrap() error { return e.Err }
 // Do FSM
 // ev Event
 // userData event specific data
-// logging save transit log
 // returns
 //    State - next state
 //    bool - represents end of transition
 //    error - handler returned error
-func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (State, bool, error) {
+func (e *Entry) TransitWithData(ev string, userData interface{}) (State, bool, error) {
 	event := Event{ev}
 	_, found := e.table.Events[event]
 	if !found {
@@ -341,6 +353,11 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 		}
 	}
 
+	// check the next state is defined as final state
+	if _, ok := e.table.FSMap[e.State.Name]; ok {
+		eot = true
+	}
+
 	if e.LogMax > 0 {
 		log := &TrnasitLog{}
 		log.time = time.Now()
@@ -362,8 +379,8 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 
 // Do FSM
 // ev Event
-func (e *Entry) Transit(ev string, logging bool) (State, bool, error) {
-	return e.TransitWithData(ev, nil, logging)
+func (e *Entry) Transit(ev string) (State, bool, error) {
+	return e.TransitWithData(ev, nil)
 }
 
 func t2s(t time.Time) string {

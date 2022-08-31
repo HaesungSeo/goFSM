@@ -50,7 +50,7 @@ func main() {
 	door.entry = e
 
 	// invalid event error
-	state, _, err := e.Transit("lock", true)
+	state, _, err := e.Transit("lock")
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
@@ -64,10 +64,10 @@ func main() {
 	}
 
 	// Closed -> Opened
-	e.Transit("Open", true)
+	e.Transit("Open")
 
 	// Opened -> Opened
-	state, _, err = e.Transit("Open", true)
+	state, _, err = e.Transit("Open")
 	if err != nil {
 		if errors.Is(err, fsmerror.ErrInvalidEvent) {
 			fmt.Printf("ERROR: %s\n", err.Error())
