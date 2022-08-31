@@ -10,14 +10,17 @@ import (
 	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
 )
 
+// FSM State
 type State struct {
 	Name string
 }
 
+// FSM Event
 type Event struct {
 	Name string
 }
 
+// FSM State Event Transition log information
 type TrnasitLog struct {
 	time    time.Time // time event occurs
 	state   string    // current State
@@ -38,7 +41,10 @@ type Entry struct {
 }
 
 // State Event Handle Function
-// returns (nextState, endOftransit, error)
+// returns
+//   State - next state
+//   bool - End of Transition
+//   error - handler error
 type HandleFunc func(Owner interface{}, event Event, UserData interface{}) (State, bool, error)
 
 type Handle struct {
@@ -258,7 +264,12 @@ func (e *UndefinedNextState) Unwrap() error { return e.Err }
 
 // Do FSM
 // ev Event
+// userData event specific data
 // logging save transit log
+// returns
+//    State - next state
+//    bool - represents end of transition
+//    error - handler returned error
 func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (State, bool, error) {
 	event := Event{ev}
 	_, found := e.table.Events[event]
@@ -276,13 +287,11 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 	state := e.State.Name
 	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
 
-	if err != nil {
-		// no state change at all
-
-	} else if stateReturned.Name == "" {
+	if stateReturned.Name == "" {
 		// fsm handle follow the fsm description tables' next state
 		if len(handle.Cands) > 1 {
 			// too many next state
+			eot = true
 			err = &UndefinedNextState{
 				State:  e.State.Name,
 				Event:  ev,
@@ -293,7 +302,6 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 		} else {
 			e.State = handle.Cands[0]
 		}
-
 	} else {
 		// state which fsm handle returned, must be one of the pre-defined candidates
 		if len(handle.Cands) > 1 {
@@ -309,6 +317,7 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 				// nextState determined by Func
 				e.State = stateReturned
 			} else {
+				eot = true
 				err = &UndefinedNextState{
 					State:  e.State.Name,
 					Event:  ev,
@@ -321,6 +330,7 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
 		} else {
+			eot = true
 			err = &UndefinedNextState{
 				State:  e.State.Name,
 				Event:  ev,
@@ -350,6 +360,8 @@ func (e *Entry) TransitWithData(ev string, userData interface{}, logging bool) (
 	return e.State, eot, err
 }
 
+// Do FSM
+// ev Event
 func (e *Entry) Transit(ev string, logging bool) (State, bool, error) {
 	return e.TransitWithData(ev, nil, logging)
 }

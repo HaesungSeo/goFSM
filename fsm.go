@@ -287,13 +287,11 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 	state := e.State.Name
 	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
 
-	if err != nil {
-		// no state change at all
-
-	} else if stateReturned.Name == "" {
+	if stateReturned.Name == "" {
 		// fsm handle follow the fsm description tables' next state
 		if len(handle.Cands) > 1 {
 			// too many next state
+			eot = true
 			err = &UndefinedNextState{
 				State:  e.State.Name,
 				Event:  ev,
@@ -304,7 +302,6 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 		} else {
 			e.State = handle.Cands[0]
 		}
-
 	} else {
 		// state which fsm handle returned, must be one of the pre-defined candidates
 		if len(handle.Cands) > 1 {
@@ -320,6 +317,7 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 				// nextState determined by Func
 				e.State = stateReturned
 			} else {
+				eot = true
 				err = &UndefinedNextState{
 					State:  e.State.Name,
 					Event:  ev,
@@ -332,6 +330,7 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 			// static nextState determined by FSMCtrl
 			e.State = handle.Cands[0]
 		} else {
+			eot = true
 			err = &UndefinedNextState{
 				State:  e.State.Name,
 				Event:  ev,
