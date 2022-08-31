@@ -12,24 +12,25 @@ type Door struct {
 }
 
 //func OpenDoor(data interface{}, event fsm.Event) (fsm.State, error) {
-func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
+func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
 	door := owner.(*Door)
 	entry := door.entry
 	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Name)
-	return fsm.State{"Opened"}, true, nil
+	return fsm.State{Name: "Opened"}, nil
 }
 
-func CloseDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
+func CloseDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
 	door := owner.(*Door)
 	entry := door.entry
 	fmt.Printf("%s: State=%s, Event=%s, Action=CloseDoor\n", door.name, entry.State, event.Name)
-	return fsm.State{"Closed"}, true, nil
+	return fsm.State{Name: "Closed"}, nil
 }
 
 func main() {
 	d := fsm.TableDesc{
-		InitState: "Closed",
-		LogMax:    20,
+		InitState:   "Closed",
+		FinalStates: []string{"Closed", "Opened"},
+		LogMax:      20,
 		States: []fsm.StateDesc{
 			{
 				State: "Closed",

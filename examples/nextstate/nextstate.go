@@ -18,11 +18,11 @@ type Key struct {
 	id string
 }
 
-func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, bool, error) {
+func OpenDoor(owner interface{}, event fsm.Event, _ interface{}) (fsm.State, error) {
 	door := owner.(*Door)
 	entry := door.entry
 	fmt.Printf("%s: State=%s, Event=%s, Action=OpenDoor\n", door.name, entry.State, event.Name)
-	return fsm.State{"Opened"}, true, nil
+	return fsm.State{Name: "Opened"}, nil
 }
 
 type LockWithNoKeyError struct {
@@ -37,7 +37,7 @@ func (e *LockWithNoKeyError) Error() string {
 
 func (e *LockWithNoKeyError) Unwrap() error { return e.Err }
 
-func LockDoor(data interface{}, event fsm.Event, userData interface{}) (fsm.State, bool, error) {
+func LockDoor(data interface{}, event fsm.Event, userData interface{}) (fsm.State, error) {
 	door := data.(*Door)
 	entry := door.entry
 	key := userData.(*Key)
@@ -47,12 +47,12 @@ func LockDoor(data interface{}, event fsm.Event, userData interface{}) (fsm.Stat
 
 		// fsm state can be changed inside handle, according to userData
 		if key.id == "root" {
-			return fsm.State{"Locked"}, true, nil
+			return fsm.State{Name: "Locked"}, nil
 		}
-		return entry.State, true, nil
+		return entry.State, nil
 	} else {
 		fmt.Printf("%s: State=%s, Event=%s, Action=LockDoor, Oops\n", door.name, entry.State, event.Name)
-		return fsm.State{}, true, &LockWithNoKeyError{State: entry.State.Name,
+		return fsm.State{}, &LockWithNoKeyError{State: entry.State.Name,
 			Event: event.Name, Err: fsmerror.ErrInvalidEvent}
 	}
 }
@@ -62,8 +62,9 @@ func main() {
 	flag.Parse()
 
 	d := fsm.TableDesc{
-		InitState: "Closed",
-		LogMax:    20,
+		InitState:   "Closed",
+		FinalStates: []string{"Closed", "Opened", "Locked"},
+		LogMax:      20,
 		States: []fsm.StateDesc{
 			{
 				State: "Closed",

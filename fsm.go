@@ -45,9 +45,8 @@ type EndOfTrans bool
 // FSM State Event Func func
 // returns
 //   State - next state
-//   bool - End of Transition
 //   error - handler error
-type HandleFunc[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, bool, error)
+type HandleFunc[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, error)
 
 // FSM State Event Handler information
 type Handle[OWNER any, USERDATA any] struct {
@@ -297,8 +296,9 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 		return State{}, true, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
+	eot := false // remark the end of transit
 	state := e.State.Name
-	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
+	stateReturned, err := handle.Func(e.Owner, event, userData)
 
 	if stateReturned.Name == "" {
 		// fsm handle follow the fsm description tables' next state

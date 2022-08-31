@@ -45,7 +45,7 @@ type Entry struct {
 //   State - next state
 //   bool - End of Transition
 //   error - handler error
-type HandleFunc func(Owner interface{}, event Event, UserData interface{}) (State, bool, error)
+type HandleFunc func(Owner interface{}, event Event, UserData interface{}) (State, error)
 
 type Handle struct {
 	Default bool       // is default handler
@@ -296,8 +296,9 @@ func (e *Entry) TransitWithData(ev string, userData interface{}) (State, bool, e
 		return State{}, true, &UndefinedHandle{State: e.State.Name, Event: ev, Err: fsmerror.ErrHandleNotExists}
 	}
 
+	eot := false // remark the end of transit
 	state := e.State.Name
-	stateReturned, eot, err := handle.Func(e.Owner, event, userData)
+	stateReturned, err := handle.Func(e.Owner, event, userData)
 
 	if stateReturned.Name == "" {
 		// fsm handle follow the fsm description tables' next state

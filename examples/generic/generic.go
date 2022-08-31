@@ -23,12 +23,12 @@ type Door struct {
 }
 
 // 3) define Callback functions
-func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, bool, error) {
+func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, error) {
 	entry := door.entry
 
 	fmt.Printf("Door %s: State=%s, Event=%s, Action=OpenDoor\n",
 		door.name, entry.State, event.Name)
-	return fsm.State{Name: "Opened"}, true, nil
+	return fsm.State{Name: "Opened"}, nil
 }
 
 type NoKeyError struct {
@@ -43,17 +43,17 @@ func (e *NoKeyError) Error() string {
 
 func (e *NoKeyError) Unwrap() error { return e.Err }
 
-func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, bool, error) {
+func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, error) {
 	entry := door.entry
 	if key != nil {
 		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
 			door.name, entry.State, event.Name, key.id)
-		return fsm.State{Name: "Locked"}, true, nil
+		return fsm.State{Name: "Locked"}, nil
 	}
 
 	fmt.Printf("Door %s: State=%s, Event=%s, NOKEY Action=LockDoor\n",
 		door.name, entry.State, event.Name)
-	return fsm.State{Name: "Closed"}, true, &NoKeyError{
+	return fsm.State{Name: "Closed"}, &NoKeyError{
 		State: entry.State.Name,
 		Event: event.Name,
 		Err:   fsmerror.ErrInvalidUserData,
@@ -66,8 +66,9 @@ func main() {
 
 	// 4) define FSM descriptor
 	d := &fsm.TableDesc[*Door, *Key]{
-		InitState: "Closed",
-		LogMax:    20,
+		InitState:   "Closed",
+		FinalStates: []string{"Opned", "Closed", "Locked"},
+		LogMax:      20,
 		States: []fsm.StateDesc[*Door, *Key]{
 			{
 				State: "Closed",
