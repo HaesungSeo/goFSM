@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 
-	fsm "github.com/HaesungSeo/goFSM"
-	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
+	fsm "github.com/HaesungSeo/goFSM/v2"
+	fsmerror "github.com/HaesungSeo/goFSM/v2/internal/fsmerrors"
 )
 
-//////////////////////////////////////////////////
+// ////////////////////////////////////////////////
 // coding convention
 // 1) define FSM event specific userData
 type Key struct {
@@ -23,12 +23,12 @@ type Door struct {
 }
 
 // 3) define Callback functions
-func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.State, error) {
+func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.HandleRetCode, error) {
 	entry := door.entry
 
 	fmt.Printf("Door %s: State=%s, Event=%s, Action=OpenDoor\n",
 		door.name, entry.State, event.Name)
-	return fsm.State{Name: "Opened"}, nil
+	return fsm.ExitOK, nil
 }
 
 type NoKeyError struct {
@@ -43,17 +43,17 @@ func (e *NoKeyError) Error() string {
 
 func (e *NoKeyError) Unwrap() error { return e.Err }
 
-func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.State, error) {
+func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.HandleRetCode, error) {
 	entry := door.entry
 	if key != nil {
 		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
 			door.name, entry.State, event.Name, key.id)
-		return fsm.State{Name: "Locked"}, nil
+		return fsm.ExitOK, nil
 	}
 
 	fmt.Printf("Door %s: State=%s, Event=%s, NOKEY Action=LockDoor\n",
 		door.name, entry.State, event.Name)
-	return fsm.State{Name: "Closed"}, &NoKeyError{
+	return fsm.ExitFail, &NoKeyError{
 		State: entry.State.Name,
 		Event: event.Name,
 		Err:   fsmerror.ErrInvalidUserData,
@@ -73,8 +73,21 @@ func main() {
 			{
 				State: "Closed",
 				Events: []fsm.EventDesc[*Door, *Key]{
-					{Event: "Open", Func: OpenDoor, Candidates: []string{"Opened"}},
-					{Event: "Lock", Func: LockDoor, Candidates: []string{"Closed", "Locked"}},
+					{Event: "Open", Func: OpenDoor, CandList: []string{"Opened", "Closed"}},
+					{Event: "Lock", Func: LockDoor, CandList: []string{"Locked", "Closed"}},
+				},
+			},
+			{
+				State: "Opened",
+				Events: []fsm.EventDesc[*Door, *Key]{
+					{Event: "Open", Func: OpenDoor, CandMap: map[fsm.HandleRetCode]string{
+						fsm.ExitOK:   "Opened",
+						fsm.ExitFail: "Opened",
+					}},
+					{Event: "Lock", Func: LockDoor, CandMap: map[fsm.HandleRetCode]string{
+						fsm.ExitOK:   "Opened",
+						fsm.ExitFail: "Opened",
+					}},
 				},
 			},
 		},

@@ -1,4 +1,4 @@
-package goFSM
+package fsm
 
 import (
 	"fmt"
@@ -6,8 +6,18 @@ import (
 	"runtime"
 	"time"
 
-	fsmerror "github.com/HaesungSeo/goFSM/internal/fsmerrors"
+	fsmerror "github.com/HaesungSeo/goFSM/v2/internal/fsmerrors"
 )
+
+// FSM Handle Exit Enumeration
+const (
+	ExitOK    = 0   // Success
+	ExitFail  = 1   // Failure
+	ExitStart = 2   // Success, conditional code start
+	ExitEnd   = 127 // Success, conditional code end
+)
+
+type HandleRetCode int
 
 // FSM State
 type State struct {
@@ -42,17 +52,17 @@ type Entry[OWNER any, USERDATA any] struct {
 // status represent the end of transition
 type EndOfTrans bool
 
-// FSM State Event Func func
-// returns
-//   State - next state
-//   error - handler error
-type HandleFunc[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (State, error)
+// FSM State Event Handle Funcion
+//
+//	HandleRetCode - Handle return code
+//	error - handler error, if any
+type HandleFuncv2[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (HandleRetCode, error)
 
 // FSM State Event Handler information
 type Handle[OWNER any, USERDATA any] struct {
-	Name  string                      // handle name
-	Func  HandleFunc[OWNER, USERDATA] // handle function
-	Cands []State                     // valid next state candidates
+	Name    string                        // handle name
+	Func    HandleFuncv2[OWNER, USERDATA] // handle function
+	CandMap map[HandleRetCode]State       // valid next state candidates
 }
 
 // FSM Table
@@ -73,10 +83,54 @@ type Table[OWNER any, USERDATA any] struct {
 }
 
 // FSM Event Action Description Table
+// CandList and CandMap describe corresponding next State for the handler's return code
+// use CandList, for simple case,
+//
+//	{
+//	    State: "Disabled",
+//	    Events: []fsm.EventDesc[*MyOwner, *MyData]{
+//	        {Event: "Add", Func: DoAdd, CandList: []string{"AddNext", "TryAgain"}},
+//	    },
+//	}
+//
+// Func DoAdd() returns one of {ExitOK, ExitFail},
+// then the FSM library lookup the next state for the returned code from the CandList[]
+// CandList[0] stores the "AddNext" next state for the return code ExitOK(0)
+// CandList[1] stores the "TryAgain" next state for the return code ExitFail(0)
+//
+// use CandMap, if handler return codes are much more or complex
+//
+//	{
+//		const (
+//		     UserDefinedCode1 = 100
+//		     UserDefinedCode2 = 200
+//		     UserDefinedCode3 = 300
+//		     UserDefinedCode4 = 400
+//		)
+//		...
+//		{
+//		    State: "Disabled",
+//		    Events: []fsm.EventDesc[*MyOwner, *MyData]{
+//		        {Event: "Add", Func: DoAdd, CandMap: map[HandleRetCode]string{
+//		                  UserDefinedCode1: "DoNext",
+//		                  UserDefinedCode1: "TryAgain",
+//		                  UserDefinedCode1: "CheckRequest",
+//		                  },
+//		               },
+//		    },
+//		},
+//	}
+//
+// Func DoAdd() returns one of {OK, NotFound, BadRequest},
+// then the FSM library lookup the next state for the returned code from the CandMap[]
+// CandMap[100] stores the "DoNext" next state for the return code UserDefinedCode1(100)
+// CandMap[200] stores the "TryAgain" next state for the return code UserDefinedCode2(200)
+// CandMap[300] stores the "CheckRequest" next state for the return code UserDefinedCode3(300)
 type EventDesc[OWNER any, USERDATA any] struct {
-	Event      string                      // Event
-	Func       HandleFunc[OWNER, USERDATA] // Handler for this {State, Event}
-	Candidates []string                    // valid next state candidates,
+	Event    string                        // Event
+	Func     HandleFuncv2[OWNER, USERDATA] // Handler for this {State, Event}
+	CandMap  map[HandleRetCode]string      // valid next state candidates,
+	CandList []string                      // valid next state candidates,
 	// if nil, handler MUST PROVIDE next state
 }
 
@@ -110,11 +164,56 @@ type StateEventConflictError struct {
 }
 
 func (e *StateEventConflictError) Error() string {
-	return e.Err.Error() + ": State " + e.State + " Event " + e.Event + " Old Func " +
-		e.OldHandle + " New Func " + e.NewHandle
+	return e.Err.Error() + ": State=" + e.State + ", Event=" + e.Event +
+		", Old Func=" + e.OldHandle +
+		", New Func=" + e.NewHandle
 }
 
 func (e *StateEventConflictError) Unwrap() error { return e.Err }
+
+type HandleRetCodeRangeError struct {
+	State  string // current state
+	Event  string // input event
+	Handle string // current handle
+	Code   HandleRetCode
+	Err    error
+}
+
+func (e *HandleRetCodeRangeError) Error() string {
+	return e.Err.Error() + ": Code=" + string(e.Code) + ", State=" + e.State +
+		", Event=" + e.Event + ", Func=" + e.Handle
+}
+
+func (e *HandleRetCodeRangeError) Unwrap() error { return nil }
+
+type HandleRetCodeDupError struct {
+	State  string // current state
+	Event  string // input event
+	Handle string // current handle
+	Code   HandleRetCode
+	Err    error
+}
+
+func (e *HandleRetCodeDupError) Error() string {
+	return e.Err.Error() + ": Code=" + string(e.Code) + ", State=" + e.State +
+		", Event=" + e.Event + ", Func=" + e.Handle
+}
+
+func (e *HandleRetCodeDupError) Unwrap() error { return nil }
+
+type HandleEmptyRetCodeError struct {
+	State  string // current state
+	Event  string // input event
+	Handle string // current handle
+	Err    error
+}
+
+func (e *HandleEmptyRetCodeError) Error() string {
+	return e.Err.Error() + ": State=" + e.State +
+		", Event=" + e.Event + ", Func=" + e.Handle
+}
+
+func (e *HandleEmptyRetCodeError) Unwrap() error { return nil }
 
 // Create New FSM Control Instance
 // d FSM Descritor
@@ -143,8 +242,12 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 			tbl.Events[Event{event.Event}] = nil
 
 			// Index NextState
-			for _, nstate := range event.Candidates {
+			for _, nstate := range event.CandList {
 				tbl.States[State{nstate}] = nil
+			}
+			// Index NextState
+			for _, v := range event.CandMap {
+				tbl.States[State{v}] = nil
 			}
 		}
 	}
@@ -161,10 +264,53 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 			handle := Handle[OWNER, USERDATA]{
 				hName,
 				event.Func,
-				make([]State, 0),
+				make(map[HandleRetCode]State, 0),
 			}
-			for _, nstate := range event.Candidates {
-				handle.Cands = append(handle.Cands, State{nstate})
+			// build vaild next states for corresponding return codes
+			for idx, nstate := range event.CandList {
+				switch {
+				case idx == ExitFail:
+					fallthrough
+				case idx == ExitOK:
+					fallthrough
+				case idx >= ExitStart && idx <= ExitEnd:
+					if _, ok := handle.CandMap[HandleRetCode(idx)]; ok {
+						return nil, &HandleRetCodeDupError{
+							State:  state.State,
+							Event:  event.Event,
+							Handle: hName,
+							Code:   HandleRetCode(idx),
+						}
+					}
+					handle.CandMap[HandleRetCode(idx)] = State{nstate}
+				default:
+					return nil, &HandleRetCodeRangeError{
+						State:  state.State,
+						Event:  event.Event,
+						Handle: hName,
+						Code:   HandleRetCode(idx),
+					}
+				}
+			}
+			for idx, nstate := range event.CandMap {
+				if _, ok := handle.CandMap[HandleRetCode(idx)]; ok {
+					return nil, &HandleRetCodeDupError{
+						State:  state.State,
+						Event:  event.Event,
+						Handle: hName,
+						Code:   HandleRetCode(idx),
+					}
+				}
+				handle.CandMap[HandleRetCode(idx)] = State{nstate}
+			}
+
+			if len(handle.CandMap) == 0 {
+				return nil, &HandleEmptyRetCodeError{
+					State:  state.State,
+					Event:  event.Event,
+					Handle: hName,
+					Err:    fsmerror.ErrHandleNoRetCode,
+				}
 			}
 
 			s, statefound := tbl.Handles[State{state.State}]
@@ -214,7 +360,20 @@ func (tbl *Table[ONWER, USERDATA]) Dump() {
 	for state, events := range tbl.Handles {
 		fmt.Printf("State[%s]\n", state)
 		for event, handle := range events {
-			fmt.Printf("  Event[%s] Func[%s] NextState[%s]\n", event, handle.Name, handle.Cands)
+			keys := make([]HandleRetCode, 0, len(handle.CandMap))
+			for hrc := range handle.CandMap {
+				keys = append(keys, hrc)
+			}
+			for i, k := range keys {
+				switch i {
+				case 0:
+					// first return code
+					fmt.Printf("  Event[%s] Func[%s] Return code[%d] Next State[%s]\n",
+						event, handle.Name, k, handle.CandMap[HandleRetCode(k)])
+				default:
+					fmt.Printf("    Return code[%d] Next State[%s]\n", k, handle.CandMap[HandleRetCode(k)])
+				}
+			}
 		}
 	}
 }
@@ -239,7 +398,7 @@ type InvalidEvent struct {
 }
 
 func (e *InvalidEvent) Error() string {
-	return e.Err.Error() + ": " + e.Event
+	return e.Err.Error() + ": Event=" + e.Event
 }
 
 func (e *InvalidEvent) Unwrap() error { return e.Err }
@@ -252,8 +411,7 @@ type UndefinedHandle struct {
 }
 
 func (e *UndefinedHandle) Error() string {
-	return e.Err.Error() + ": State " + e.State + " Event " + e.Event +
-		": Handle not defined"
+	return e.Err.Error() + ": State=" + e.State + ", Event=" + e.Event
 }
 
 func (e *UndefinedHandle) Unwrap() error { return e.Err }
@@ -268,20 +426,38 @@ type UndefinedNextState struct {
 }
 
 func (e *UndefinedNextState) Error() string {
-	return e.Err.Error() + ": State " + e.State +
-		" Event " + e.Event + " Handle " + e.Handle +
-		": returns undefined state " + e.nState
+	return e.Err.Error() + ": State=" + e.State +
+		", Event=" + e.Event + ", Handle=" + e.Handle +
+		", Next State=" + e.nState
 }
 
 func (e *UndefinedNextState) Unwrap() error { return e.Err }
+
+// Undefined return code Error
+type UndefinedRetCode struct {
+	State   string
+	Event   string
+	Handle  string
+	RetCode HandleRetCode
+	Err     error
+}
+
+func (e *UndefinedRetCode) Error() string {
+	return e.Err.Error() + ": Code=" + string(e.RetCode) +
+		", State=" + e.State + ", Event=" + e.Event +
+		", Handle=" + e.Handle
+}
+
+func (e *UndefinedRetCode) Unwrap() error { return e.Err }
 
 // Do FSM
 // ev Event
 // userData event specific data
 // returns
-//    State - next state
-//    bool - represents end of transition
-//    error - handler returned error
+//
+//	State - next state
+//	bool - represents end of transition
+//	error - handler returned error
 func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (State, bool, error) {
 	event := Event{ev}
 	_, found := e.table.Events[event]
@@ -298,65 +474,24 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 
 	eot := false // remark the end of transit
 	state := e.State.Name
-	stateReturned, err := handle.Func(e.Owner, event, userData)
+	retCode, err := handle.Func(e.Owner, event, userData)
 
-	if stateReturned.Name == "" {
-		// fsm handle follow the fsm description tables' next state
-		if len(handle.Cands) > 1 {
-			// too many next state
-			eot = true
-			err = &UndefinedNextState{
-				State:  e.State.Name,
-				Event:  ev,
-				Handle: handle.Name,
-				nState: "(nil)",
-				Err:    fsmerror.ErrInvNextState,
-			}
-		} else {
-			e.State = handle.Cands[0]
+	if state, ok := handle.CandMap[retCode]; !ok {
+		eot = true
+		err = &UndefinedRetCode{
+			State:   e.State.Name,
+			Event:   ev,
+			Handle:  handle.Name,
+			RetCode: retCode,
+			Err:     fsmerror.ErrInvalidRetCode,
 		}
 	} else {
-		// state which fsm handle returned, must be one of the pre-defined candidates
-		if len(handle.Cands) > 1 {
-			// validate the handle result with candidates
-			valid := false
-			for _, c := range handle.Cands {
-				if c == stateReturned {
-					valid = true
-					break
-				}
-			}
-			if valid {
-				// nextState determined by Func
-				e.State = stateReturned
-			} else {
-				eot = true
-				err = &UndefinedNextState{
-					State:  e.State.Name,
-					Event:  ev,
-					Handle: handle.Name,
-					nState: stateReturned.Name,
-					Err:    fsmerror.ErrInvNextState,
-				}
-			}
-		} else if handle.Cands[0] == stateReturned {
-			// static nextState determined by FSMCtrl
-			e.State = handle.Cands[0]
-		} else {
-			eot = true
-			err = &UndefinedNextState{
-				State:  e.State.Name,
-				Event:  ev,
-				Handle: handle.Name,
-				nState: stateReturned.Name,
-				Err:    fsmerror.ErrInvNextState,
-			}
-		}
-	}
+		e.State = state
 
-	// check the next state is defined as final state
-	if _, ok := e.table.FSMap[e.State.Name]; ok {
-		eot = true
+		// check the next state is defined as final state
+		if _, ok := e.table.FSMap[e.State.Name]; ok {
+			eot = true
+		}
 	}
 
 	if e.LogMax > 0 {
@@ -391,7 +526,8 @@ func t2s(t time.Time) string {
 
 // PrintLog
 // last print number of latest n logs, if n > 0
-//   otherwise print all logs
+//
+//	otherwise print all logs
 func (e *Entry[OWNER, USERDATA]) PrintLog(last int) {
 	nLogs := len(e.Logs)
 	start := 0
