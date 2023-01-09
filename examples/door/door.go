@@ -80,11 +80,11 @@ func main() {
 			{
 				State: "Opened",
 				Events: []fsm.EventDesc[*Door, *Key]{
-					{Event: "Open", Func: OpenDoor, CandMap: map[fsm.HandleRetCode]string{
+					{Event: "Open", Func: OpenDoor, CandMap: fsm.CandMap{
 						fsm.ExitOK:   "Opened",
 						fsm.ExitFail: "Opened",
 					}},
-					{Event: "Lock", Func: LockDoor, CandMap: map[fsm.HandleRetCode]string{
+					{Event: "Lock", Func: LockDoor, CandMap: fsm.CandMap{
 						fsm.ExitOK:   "Opened",
 						fsm.ExitFail: "Opened",
 					}},

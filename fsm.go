@@ -58,11 +58,13 @@ type EndOfTrans bool
 //	error - handler error, if any
 type HandleFuncv2[OWNER any, USERDATA any] func(Owner OWNER, event Event, UserData USERDATA) (HandleRetCode, error)
 
+type CandMap map[HandleRetCode]string
+
 // FSM State Event Handler information
 type Handle[OWNER any, USERDATA any] struct {
 	Name    string                        // handle name
 	Func    HandleFuncv2[OWNER, USERDATA] // handle function
-	CandMap map[HandleRetCode]State       // valid next state candidates
+	CandMap CandMap                       // valid next state candidates
 }
 
 // FSM Table
@@ -129,7 +131,7 @@ type Table[OWNER any, USERDATA any] struct {
 type EventDesc[OWNER any, USERDATA any] struct {
 	Event    string                        // Event
 	Func     HandleFuncv2[OWNER, USERDATA] // Handler for this {State, Event}
-	CandMap  map[HandleRetCode]string      // valid next state candidates,
+	CandMap  CandMap                       // valid next state candidates,
 	CandList []string                      // valid next state candidates,
 	// if nil, handler MUST PROVIDE next state
 }
@@ -264,7 +266,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 			handle := Handle[OWNER, USERDATA]{
 				hName,
 				event.Func,
-				make(map[HandleRetCode]State, 0),
+				make(CandMap, 0),
 			}
 			// build vaild next states for corresponding return codes
 			for idx, nstate := range event.CandList {
@@ -282,7 +284,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 							Code:   HandleRetCode(idx),
 						}
 					}
-					handle.CandMap[HandleRetCode(idx)] = State{nstate}
+					handle.CandMap[HandleRetCode(idx)] = nstate
 				default:
 					return nil, &HandleRetCodeRangeError{
 						State:  state.State,
@@ -301,7 +303,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 						Code:   HandleRetCode(idx),
 					}
 				}
-				handle.CandMap[HandleRetCode(idx)] = State{nstate}
+				handle.CandMap[HandleRetCode(idx)] = nstate
 			}
 
 			if len(handle.CandMap) == 0 {
@@ -486,7 +488,7 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 			Err:     fsmerror.ErrInvalidRetCode,
 		}
 	} else {
-		e.State = state
+		e.State = State{state}
 
 		// check the next state is defined as final state
 		if _, ok := e.table.FSMap[e.State.Name]; ok {
