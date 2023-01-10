@@ -48,6 +48,7 @@ func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.HandleRetCode, error) 
 	if key != nil {
 		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=LockDoor\n",
 			door.name, entry.State, event.Name, key.id)
+		entry.Set("key", key)
 		return fsm.ExitOK, nil
 	}
 
@@ -58,6 +59,22 @@ func LockDoor(door *Door, event fsm.Event, key *Key) (fsm.HandleRetCode, error) 
 		Event: event.Name,
 		Err:   fsmerror.ErrInvalidUserData,
 	}
+}
+
+func PrintKey(door *Door, event fsm.Event, key *Key) (fsm.HandleRetCode, error) {
+	entry := door.entry
+	data := entry.Get("key")
+	if data != nil {
+		key := data.(*Key)
+		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=PrintKey\n",
+			door.name, entry.State, event.Name, key.id)
+
+	} else {
+		fmt.Printf("Door %s: State=%s, Event=%s, Key=%s, Action=PrintKey\n",
+			door.name, entry.State, event.Name, key.id)
+		entry.Set("key", key)
+	}
+	return fsm.ExitOK, nil
 }
 
 func main() {
@@ -74,7 +91,7 @@ func main() {
 				State: "Closed",
 				Events: []fsm.EventDesc[*Door, *Key]{
 					{Event: "Open", Func: OpenDoor, CandList: []string{"Opened", "Closed"}},
-					{Event: "Lock", Func: LockDoor, CandList: []string{"Locked", "Closed"}},
+					{Event: "Lock", Func: LockDoor, CandList: []string{"Locking", "Closed"}},
 				},
 			},
 			{
@@ -85,8 +102,16 @@ func main() {
 						fsm.ExitFail: "Opened",
 					}},
 					{Event: "Lock", Func: LockDoor, CandMap: fsm.CandMap{
-						fsm.ExitOK:   "Opened",
+						fsm.ExitOK:   "Locked",
 						fsm.ExitFail: "Opened",
+					}},
+				},
+			},
+			{
+				State: "Locking",
+				Events: []fsm.EventDesc[*Door, *Key]{
+					{Event: "Lock", Func: PrintKey, CandMap: fsm.CandMap{
+						fsm.ExitOK: "Locked",
 					}},
 				},
 			},

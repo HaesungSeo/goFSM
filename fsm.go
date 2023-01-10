@@ -35,8 +35,8 @@ type TrnasitLog struct {
 	state  string    // current State
 	event  string    // Event
 	handle string    // Func
+	ret    int       // Func's return code
 	next   string    // next event determined by Handler
-	msg    string    // Messages related for this fsm event
 	err    error     // Error, from handle
 }
 
@@ -47,6 +47,22 @@ type Entry[OWNER any, USERDATA any] struct {
 	State  State                   // Current State
 	Logs   []*TrnasitLog           // transition log, for debug
 	LogMax int
+	Datas  map[string]interface{} // storage for temp datas
+}
+
+// Set stores tempral variables.
+// HandleFunc can call Set() to store temporal data needed between handleFuncs
+func (e *Entry[OWNER, USERDATA]) Set(key string, value interface{}) {
+	e.Datas[key] = value
+}
+
+// Get returns the stored tempral variables.
+// HandleFunc can call Get() to get temporal data which saved by other handleFuncs
+func (e *Entry[OWNER, USERDATA]) Get(key string) interface{} {
+	if v, ok := e.Datas[key]; ok {
+		return v
+	}
+	return nil
 }
 
 // status represent the end of transition
@@ -337,6 +353,18 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 		}
 	}
 
+	for state, _ := range tbl.States {
+		if _, ok := tbl.Handles[state]; !ok {
+			if _, ok := tbl.FSMap[state.Name]; !ok {
+				return nil, &UndefinedHandle{
+					State: state.Name,
+					Event: "any",
+					Err:   fsmerror.ErrHandleNotExists,
+				}
+			}
+		}
+	}
+
 	return &tbl, nil
 }
 
@@ -389,6 +417,7 @@ func (tbl *Table[OWNER, USERDATA]) NewEntry(owner OWNER) *Entry[OWNER, USERDATA]
 	entry.State = tbl.InitState
 	entry.Logs = make([]*TrnasitLog, 0)
 	entry.LogMax = tbl.LogMax
+	entry.Datas = make(map[string]interface{})
 
 	return entry
 }
@@ -502,6 +531,7 @@ func (e *Entry[OWNER, USERDATA]) TransitWithData(ev string, userData USERDATA) (
 		log.state = state
 		log.event = event.Name
 		log.handle = handle.Name
+		log.ret = int(retCode)
 		log.next = e.State.Name
 		log.err = err
 
@@ -540,11 +570,11 @@ func (e *Entry[OWNER, USERDATA]) PrintLog(last int) {
 	for i := start; i < nLogs; i++ {
 		log := e.Logs[i]
 		if log.err != nil {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s] Err=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.next, log.err.Error())
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] RetCode=[%d] NextState=[%s] Err=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.ret, log.next, log.err.Error())
 		} else {
-			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] NextState=[%s]\n",
-				t2s(log.time), log.state, log.event, log.handle, log.next)
+			fmt.Printf("%s State=[%s] Event=[%s] Func=[%s] RetCode=[%d] NextState=[%s]\n",
+				t2s(log.time), log.state, log.event, log.handle, log.ret, log.next)
 		}
 	}
 }

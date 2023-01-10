@@ -39,7 +39,13 @@ type Door struct {
 	entry *fsm.Entry[*Door, *Key]
 }
 
-// 3) define Callback functions
+// 3) define return code for Callback functions
+const (
+	ExitInprogress = fsm.ExitStart
+	ExitAgain      = fsm.ExitStart + 1
+)
+
+// 4) define Callback functions
 func OpenDoor(door *Door, event fsm.Event, _ *Key) (fsm.HandleRetCode, error) {
 	entry := door.entry
 
@@ -81,7 +87,7 @@ func main() {
 	user := flag.String("k", "", "key id")
 	flag.Parse()
 
-	// 4) define FSM descriptor
+	// 5) define FSM descriptor
 	d := &fsm.TableDesc[*Door, *Key]{
 		InitState:   "Closed",
 		FinalStates: []string{"Opned", "Closed", "Locked"},
@@ -110,18 +116,18 @@ func main() {
 		},
 	}
 
-	// 5) define FSM Instance
+	// 6) define FSM Instance
 	fsmCtl, err := fsm.NewTable(d)
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
 
-	// 6) define FSM Entry
+	// 7) define FSM Entry
 	door := Door{name: "myDoor"}
 	door.entry = fsmCtl.NewEntry(&door)
 
-	// 7) Transit() !
+	// 8) Transit() !
 	var key *Key = nil
 	if *user != "" {
 		key = &Key{id: *user}
