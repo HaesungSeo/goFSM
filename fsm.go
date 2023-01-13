@@ -354,12 +354,32 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 	}
 
 	for state, _ := range tbl.States {
-		if _, ok := tbl.Handles[state]; !ok {
+		// check the state has any handle
+		if hmap, ok := tbl.Handles[state]; !ok {
 			if _, ok := tbl.FSMap[state.Name]; !ok {
 				return nil, &UndefinedHandle{
 					State: state.Name,
 					Event: "any",
 					Err:   fsmerror.ErrHandleNotExists,
+				}
+			}
+		} else {
+			// check the handle has any Funcion
+			if len(hmap) == 0 {
+				return nil, &UndefinedHandle{
+					State: state.Name,
+					Event: "any",
+					Err:   fsmerror.ErrHandleNotExists,
+				}
+			}
+			// check the handle has next state, any
+			for e, h := range hmap {
+				if len(h.CandMap) == 0 {
+					return nil, &UndefinedHandle{
+						State: state.Name,
+						Event: e.Name,
+						Err:   fsmerror.ErrHandleNotExists,
+					}
 				}
 			}
 		}
