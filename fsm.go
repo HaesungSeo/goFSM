@@ -395,20 +395,24 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 				// check the next state-event has handler
 				//tbl.States[State{nstate}] = nil
 				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
-					return nil, &UndefinedHandle{
-						State: nstate,
-						Event: event.Event,
-						Err:   fsmerror.ErrHandleNotExists,
+					if _, ok := tbl.FSMap[nstate]; !ok {
+						return nil, &UndefinedHandle{
+							State: nstate,
+							Event: event.Event,
+							Err:   fsmerror.ErrHandleNotExists,
+						}
 					}
 				}
 			}
 			for _, nstate := range event.CandMap {
 				//tbl.States[State{v}] = nil
 				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
-					return nil, &UndefinedHandle{
-						State: nstate,
-						Event: event.Event,
-						Err:   fsmerror.ErrHandleNotExists,
+					if _, ok := tbl.FSMap[nstate]; !ok {
+						return nil, &UndefinedHandle{
+							State: nstate,
+							Event: event.Event,
+							Err:   fsmerror.ErrHandleNotExists,
+						}
 					}
 				}
 			}
