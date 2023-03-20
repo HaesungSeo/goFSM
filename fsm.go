@@ -97,7 +97,7 @@ type Table[OWNER any, USERDATA any] struct {
 	Events map[Event]interface{}
 
 	// Handles indexted by State,Event
-	Handles map[State]map[Event]Handle[OWNER, USERDATA]
+	Handles map[State]map[Event]*Handle[OWNER, USERDATA]
 }
 
 // FSM Event Action Description Table
@@ -240,7 +240,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 
 	tbl.States = make(map[State]interface{})
 	tbl.Events = make(map[Event]interface{})
-	tbl.Handles = make(map[State]map[Event]Handle[OWNER, USERDATA])
+	tbl.Handles = make(map[State]map[Event]*Handle[OWNER, USERDATA])
 	tbl.FSMap = make(map[string]interface{})
 
 	tbl.InitState = State{d.InitState}
@@ -272,14 +272,14 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 
 	// Allocate Handles
 	for _, state := range d.States {
-		tbl.Handles[State{state.State}] = make(map[Event]Handle[OWNER, USERDATA])
+		tbl.Handles[State{state.State}] = make(map[Event]*Handle[OWNER, USERDATA])
 	}
 
 	// Add User defined State-Event-Handles
 	for _, state := range d.States {
 		for _, event := range state.Events {
 			hName := getFunctionName(event.Func)
-			handle := Handle[OWNER, USERDATA]{
+			handle := &Handle[OWNER, USERDATA]{
 				hName,
 				event.Func,
 				make(CandMap, 0),
@@ -364,8 +364,11 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 				}
 			}
 		} else {
+			// check the state is final state and has a (useless) event handler
+			_, finalState := tbl.FSMap[state.Name]
+
 			// check the handle has any Funcion
-			if len(hmap) == 0 {
+			if len(hmap) == 0 && !finalState {
 				return nil, &UndefinedHandle{
 					State: state.Name,
 					Event: "any",
@@ -374,10 +377,37 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 			}
 			// check the handle has next state, any
 			for e, h := range hmap {
-				if len(h.CandMap) == 0 {
+				if len(h.CandMap) == 0 && !finalState {
 					return nil, &UndefinedHandle{
 						State: state.Name,
 						Event: e.Name,
+						Err:   fsmerror.ErrHandleNotExists,
+					}
+				}
+			}
+		}
+	}
+
+	// check the next state-event has handler
+	for _, state := range d.States {
+		for _, event := range state.Events {
+			for _, nstate := range event.CandList {
+				// check the next state-event has handler
+				//tbl.States[State{nstate}] = nil
+				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
+					return nil, &UndefinedHandle{
+						State: nstate,
+						Event: event.Event,
+						Err:   fsmerror.ErrHandleNotExists,
+					}
+				}
+			}
+			for _, nstate := range event.CandMap {
+				//tbl.States[State{v}] = nil
+				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
+					return nil, &UndefinedHandle{
+						State: nstate,
+						Event: event.Event,
 						Err:   fsmerror.ErrHandleNotExists,
 					}
 				}
