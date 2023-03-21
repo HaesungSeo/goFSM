@@ -353,11 +353,12 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 		}
 	}
 
+	// sanity check, return &tbl with error
 	for state, _ := range tbl.States {
 		// check the state has any handle
 		if hmap, ok := tbl.Handles[state]; !ok {
 			if _, ok := tbl.FSMap[state.Name]; !ok {
-				return nil, &UndefinedHandle{
+				return &tbl, &UndefinedHandle{
 					State: state.Name,
 					Event: "any",
 					Err:   fsmerror.ErrHandleNotExists,
@@ -369,7 +370,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 
 			// check the handle has any Funcion
 			if len(hmap) == 0 && !finalState {
-				return nil, &UndefinedHandle{
+				return &tbl, &UndefinedHandle{
 					State: state.Name,
 					Event: "any",
 					Err:   fsmerror.ErrHandleNotExists,
@@ -378,7 +379,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 			// check the handle has next state, any
 			for e, h := range hmap {
 				if len(h.CandMap) == 0 && !finalState {
-					return nil, &UndefinedHandle{
+					return &tbl, &UndefinedHandle{
 						State: state.Name,
 						Event: e.Name,
 						Err:   fsmerror.ErrHandleNotExists,
@@ -396,7 +397,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 				//tbl.States[State{nstate}] = nil
 				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
 					if _, ok := tbl.FSMap[nstate]; !ok {
-						return nil, &UndefinedHandle{
+						return &tbl, &UndefinedHandle{
 							State: nstate,
 							Event: event.Event,
 							Err:   fsmerror.ErrHandleNotExists,
@@ -408,7 +409,7 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 				//tbl.States[State{v}] = nil
 				if _, ok := tbl.Handles[State{nstate}][Event{event.Event}]; !ok {
 					if _, ok := tbl.FSMap[nstate]; !ok {
-						return nil, &UndefinedHandle{
+						return &tbl, &UndefinedHandle{
 							State: nstate,
 							Event: event.Event,
 							Err:   fsmerror.ErrHandleNotExists,
