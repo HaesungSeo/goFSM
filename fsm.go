@@ -233,9 +233,11 @@ func (e *HandleEmptyRetCodeError) Error() string {
 
 func (e *HandleEmptyRetCodeError) Unwrap() error { return nil }
 
+type Opts map[string]map[int]interface{}
+
 // Create New FSM Control Instance
 // d FSM Descritor
-func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OWNER, USERDATA], error) {
+func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA], opts ...Opts) (*Table[OWNER, USERDATA], error) {
 	tbl := Table[OWNER, USERDATA]{}
 
 	tbl.States = make(map[State]interface{})
@@ -413,6 +415,35 @@ func NewTable[OWNER any, USERDATA any](d *TableDesc[OWNER, USERDATA]) (*Table[OW
 							State: nstate,
 							Event: event.Event,
 							Err:   fsmerror.ErrHandleNotExists,
+						}
+					}
+				}
+			}
+
+			// check all possible return code
+			hName := getFunctionName(event.Func)
+			for _, fmap := range opts {
+				if retmap, ok := fmap[hName]; ok {
+					// we have validator
+					for ret_code, _ := range retmap {
+						hExists := false
+						// check the handle's CandList or CandMap has the ret_code defined
+						if len(event.CandList) >= ret_code {
+							hExists = true
+						} else {
+							if _, ok := event.CandMap[HandleRetCode(ret_code)]; ok {
+								hExists = true
+							}
+						}
+						if !hExists {
+							// handler for return code not found
+							return nil, &UndefinedRetCode{
+								State:   state.State,
+								Event:   event.Event,
+								Handle:  hName,
+								RetCode: HandleRetCode(ret_code),
+								Err:     fsmerror.ErrInvalidRetCode,
+							}
 						}
 					}
 				}
